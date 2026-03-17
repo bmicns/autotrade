@@ -42,7 +42,6 @@ export default function App() {
     return () => clearInterval(timer);
   }, [fetchAll]);
 
-  // WebSocket 실시간 업데이트
   const handleWsMessage = useCallback((msg) => {
     if (msg.type === "signal") {
       setSignals((prev) => [msg.data, ...prev].slice(0, 200));
@@ -60,12 +59,15 @@ export default function App() {
   return (
     <div className="min-h-dvh pb-20">
       {/* Header */}
-      <header className="sticky top-0 bg-[#0a0f1e]/90 backdrop-blur-sm border-b border-[#1a2540] px-4 py-3 z-40">
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-bold text-white">AutoTrade</h1>
+      <header className="glass-nav sticky top-0 z-40 border-b border-white/[0.06]">
+        <div className="flex items-center justify-between px-5 py-3.5">
+          <h1 className="text-[17px] font-semibold text-white tracking-tight">AutoTrade</h1>
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#34d399] animate-pulse" />
-            <span className="text-xs text-[#64748b]">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#34c759] opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#34c759]" />
+            </span>
+            <span className="text-[#86868b] text-xs font-medium">
               {process.env.NODE_ENV === "production" ? "실전" : "모의투자"}
             </span>
           </div>
