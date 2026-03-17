@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../lib/api";
 
-function formatKRW(n) {
+function fmt(n) {
   return (n || 0).toLocaleString("ko-KR");
 }
 
@@ -33,114 +33,111 @@ export default function Momentum({ positions, closedPositions, onRefresh }) {
   }
 
   return (
-    <div className="px-6 pt-10 pb-8 space-y-10 animate-fade-up">
-      {/* Header */}
-      <section className="flex items-end justify-between">
-        <div>
-          <p className="text-white/40 text-[11px] font-semibold uppercase tracking-wider mb-2">전략</p>
-          <h2 className="text-[34px] font-bold text-white tracking-tight leading-none">모멘텀</h2>
-        </div>
-        <button onClick={handleMomentumScan} disabled={scanning} className="btn-blue text-[13px] px-5 py-2.5">
+    <div className="p-[30px] space-y-[20px]">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-[18px] font-bold text-white">모멘텀 전략</h2>
+        <button onClick={handleMomentumScan} disabled={scanning} className="btn-kis text-[13px] px-[16px] py-[10px]">
           {scanning ? "스캔 중..." : "후보 스캔"}
         </button>
-      </section>
+      </div>
 
-      {/* Buy Candidates */}
+      {/* 매수 후보 */}
       {candidates.length > 0 && (
-        <section>
-          <p className="text-[#ff9f0a] text-[11px] font-semibold uppercase tracking-wider mb-4 px-1">매수 후보</p>
-          <div className="space-y-3">
-            {candidates.map((s) => (
-              <div key={s.code} className="card p-5" style={{ borderColor: "rgba(255,159,10,0.15)" }}>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-white font-semibold text-[17px] tracking-tight">{s.name}</p>
-                    <p className="text-white/30 text-[13px] mt-1">
-                      {s.code} · 스코어 <span className="text-[#ff9f0a] font-semibold">{s.momentum?.score}/5</span>
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-white/70 text-[15px] font-medium">{formatKRW(s.price)}원</span>
-                    <button
-                      onClick={() => handleBuy(s)}
-                      className="bg-[#30d158] text-black px-5 py-2 rounded-full text-[13px] font-bold active:scale-[0.97] transition-transform"
-                    >
-                      매수
-                    </button>
-                  </div>
+        <div className="kis-card overflow-hidden">
+          <div className="px-[16px] py-[12px] flex items-center gap-[8px]">
+            <span className="w-[6px] h-[6px] rounded-full bg-[#ff8a00]" />
+            <span className="text-[13px] font-bold text-[#ff8a00]">매수 후보</span>
+            <span className="text-[11px] text-[#8c919a]">{candidates.length}종목</span>
+          </div>
+          {candidates.map((s) => (
+            <div key={s.code} className="kis-row">
+              <div className="flex-1 min-w-0">
+                <p className="text-[14px] font-semibold text-white truncate">{s.name}</p>
+                <div className="flex items-center gap-[8px] mt-[3px]">
+                  <span className="text-[11px] text-[#8c919a]">{s.code}</span>
+                  <span className="badge bg-[#ff8a00]/15 text-[#ff8a00]">스코어 {s.momentum?.score}/5</span>
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
+              <div className="flex items-center gap-[12px] ml-[12px]">
+                <span className="text-[14px] font-bold text-white kis-amount">{fmt(s.price)}</span>
+                <button
+                  onClick={() => handleBuy(s)}
+                  className="bg-[#ff2f2f] text-white px-[14px] py-[8px] rounded-[6px] text-[12px] font-bold active:scale-[0.98] transition-transform"
+                >
+                  매수
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
-      {/* Active Positions */}
-      <section>
-        <p className="text-white/40 text-[11px] font-semibold uppercase tracking-wider mb-4 px-1">
-          활성 포지션 ({positions?.length || 0})
-        </p>
+      {/* 활성 포지션 */}
+      <div className="kis-card overflow-hidden">
+        <div className="px-[16px] py-[12px] flex items-center justify-between">
+          <span className="text-[13px] font-bold text-white">보유 포지션</span>
+          <span className="text-[11px] text-[#8c919a]">{positions?.length || 0}종목</span>
+        </div>
         {(!positions || positions.length === 0) ? (
-          <div className="card py-16 text-center">
-            <p className="text-white/20 text-[15px]">활성 포지션 없음</p>
+          <div className="py-[40px] text-center">
+            <p className="text-[#8c919a] text-[13px]">보유 포지션 없음</p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {positions.map((p) => (
-              <div key={p.id} className="card p-5">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-white font-semibold text-[17px] tracking-tight">{p.name}</p>
-                    <p className="text-white/30 text-[13px] mt-1">{p.qty}주 · 매수가 {formatKRW(p.buyPrice)}원</p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <p className={`text-[22px] font-bold tracking-tight ${p.profitPct >= 0 ? "text-profit" : "text-loss"}`}>
-                      {p.profitPct >= 0 ? "+" : ""}{p.profitPct?.toFixed(1)}%
-                    </p>
-                    <button
-                      onClick={() => handleClose(p.id, p.currentPrice)}
-                      className="text-[#ff453a] bg-[#ff453a]/10 px-4 py-2 rounded-full text-[13px] font-semibold active:scale-[0.97] transition-transform"
-                    >
-                      청산
-                    </button>
-                  </div>
+          positions.map((p) => (
+            <div key={p.id} className="px-[16px] py-[14px] border-t border-[#1e2640]">
+              <div className="flex justify-between items-center">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] font-semibold text-white truncate">{p.name}</p>
+                  <p className="text-[11px] text-[#8c919a] mt-[2px]">{p.qty}주 · 매수 {fmt(p.buyPrice)}</p>
                 </div>
-                <div className="gauge-track mt-4">
-                  <div
-                    className={`gauge-fill ${p.profitPct >= 0 ? "bg-[#30d158]" : "bg-[#ff453a]"}`}
-                    style={{ width: `${Math.min(Math.abs(p.profitPct) * 20, 100)}%` }}
-                  />
+                <div className="flex items-center gap-[12px] ml-[12px]">
+                  <div className="text-right">
+                    <p className={`text-[16px] font-bold kis-amount ${p.profitPct >= 0 ? "c-up" : "c-down"}`}>
+                      {p.profitPct >= 0 ? "+" : ""}{p.profitPct?.toFixed(2)}%
+                    </p>
+                    <p className="text-[11px] text-[#8c919a] mt-[1px]">{fmt(p.currentPrice)}원</p>
+                  </div>
+                  <button
+                    onClick={() => handleClose(p.id, p.currentPrice)}
+                    className="bg-[#2b83ff]/15 text-[#2b83ff] px-[12px] py-[7px] rounded-[6px] text-[11px] font-bold active:scale-[0.98] transition-transform"
+                  >
+                    청산
+                  </button>
                 </div>
               </div>
-            ))}
-          </div>
+              <div className="kis-gauge mt-[10px]">
+                <div
+                  className={`kis-gauge-fill ${p.profitPct >= 0 ? "bg-[#ff2f2f]" : "bg-[#2b83ff]"}`}
+                  style={{ width: `${Math.min(Math.abs(p.profitPct) * 20, 100)}%` }}
+                />
+              </div>
+            </div>
+          ))
         )}
-      </section>
+      </div>
 
-      {/* Closed Positions */}
+      {/* 완료 */}
       {closedPositions?.length > 0 && (
-        <section>
-          <p className="text-white/40 text-[11px] font-semibold uppercase tracking-wider mb-4 px-1">
-            완료 ({closedPositions.length})
-          </p>
-          <div className="space-y-2">
-            {closedPositions.slice(0, 10).map((p, i) => (
-              <div key={i} className="card p-4 opacity-50">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-white text-[15px] font-medium">{p.name}</p>
-                    <p className="text-white/30 text-[11px] mt-0.5">
-                      {p.closeReason === "profit_target" ? "익절" : p.closeReason === "stop_loss" ? "손절" : "수동"}
-                    </p>
-                  </div>
-                  <p className={`text-[20px] font-bold tracking-tight ${p.profitPct >= 0 ? "text-profit" : "text-loss"}`}>
-                    {p.profitPct >= 0 ? "+" : ""}{p.profitPct?.toFixed(1)}%
-                  </p>
-                </div>
-              </div>
-            ))}
+        <div className="kis-card overflow-hidden">
+          <div className="px-[16px] py-[12px] flex items-center justify-between">
+            <span className="text-[13px] font-bold text-white">매매 완료</span>
+            <span className="text-[11px] text-[#8c919a]">{closedPositions.length}건</span>
           </div>
-        </section>
+          {closedPositions.slice(0, 10).map((p, i) => (
+            <div key={i} className="kis-row opacity-60">
+              <div>
+                <p className="text-[13px] font-medium text-white">{p.name}</p>
+                <p className="text-[11px] text-[#8c919a] mt-[1px]">
+                  {p.closeReason === "profit_target" ? "익절" : p.closeReason === "stop_loss" ? "손절" : "수동청산"}
+                </p>
+              </div>
+              <p className={`text-[15px] font-bold kis-amount ${p.profitPct >= 0 ? "c-up" : "c-down"}`}>
+                {p.profitPct >= 0 ? "+" : ""}{p.profitPct?.toFixed(2)}%
+              </p>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

@@ -8,101 +8,117 @@
 }
 
 body {
-  background: #000000;
-  color: #f5f5f7;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+  background: #0a0e1a;
+  color: #e8eaed;
+  font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Noto Sans KR", sans-serif;
   min-height: 100dvh;
   overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
 }
 
 ::-webkit-scrollbar { width: 0; }
 
-/* Apple Hero Number — gradient white text */
-.hero-number {
-  font-size: 56px;
-  font-weight: 700;
-  letter-spacing: -0.04em;
-  line-height: 1;
-  background: linear-gradient(180deg, #ffffff 0%, rgba(255,255,255,0.65) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+/* 한투 색상 체계 — 상승 빨강, 하락 파랑 */
+.c-up { color: #ff2f2f; }
+.c-down { color: #2b83ff; }
+.c-flat { color: #8c919a; }
+.bg-up { background-color: rgba(255, 47, 47, 0.12); }
+.bg-down { background-color: rgba(43, 131, 255, 0.12); }
+
+/* 한투 카드 */
+.kis-card {
+  background: #141928;
+  border-radius: 12px;
+  border: 1px solid #1e2640;
 }
 
-/* Apple Card */
-.card {
-  background: rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(40px);
-  -webkit-backdrop-filter: blur(40px);
-  border: 0.5px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
+/* 한투 헤더 */
+.kis-header {
+  background: linear-gradient(180deg, #0d1225 0%, #0a0e1a 100%);
+  border-bottom: 1px solid #1e2640;
 }
 
-.card-elevated {
-  background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%);
-  backdrop-filter: blur(40px);
-  -webkit-backdrop-filter: blur(40px);
-  border: 0.5px solid rgba(255, 255, 255, 0.1);
-  border-radius: 20px;
+/* 한투 탭바 */
+.kis-tabbar {
+  background: #0d1225;
+  border-top: 1px solid #1e2640;
 }
 
-/* Apple Nav Bar */
-.nav-bar {
-  background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-}
-
-/* Profit gradient text */
-.text-profit {
-  background: linear-gradient(180deg, #30d158 0%, #28b84d 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.text-loss {
-  background: linear-gradient(180deg, #ff453a 0%, #d93025 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* Apple Blue Gradient Button */
-.btn-blue {
-  background: linear-gradient(180deg, #0a84ff 0%, #0070e0 100%);
-  color: white;
+/* 한투 주황 포인트 버튼 */
+.btn-kis {
+  background: linear-gradient(180deg, #ff8a00 0%, #e67a00 100%);
+  color: #fff;
   border: none;
-  border-radius: 980px;
-  font-size: 15px;
-  font-weight: 600;
-  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 12px 20px;
   cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition: transform 0.1s ease, opacity 0.1s ease;
 }
-.btn-blue:active { transform: scale(0.97); opacity: 0.9; }
-.btn-blue:disabled { opacity: 0.35; }
+.btn-kis:active { transform: scale(0.98); opacity: 0.9; }
+.btn-kis:disabled { opacity: 0.35; }
 
-/* Gauge bar */
-.gauge-track {
-  height: 3px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 100px;
+/* 한투 보조 버튼 */
+.btn-kis-outline {
+  background: transparent;
+  color: #ff8a00;
+  border: 1px solid #ff8a00;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 11px 20px;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.btn-kis-outline:active { transform: scale(0.98); }
+.btn-kis-outline:disabled { opacity: 0.35; }
+
+/* 한투 스타일 리스트 아이템 */
+.kis-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1e2640;
+}
+.kis-row:last-child { border-bottom: none; }
+
+/* 한투 배지 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 한투 게이지 */
+.kis-gauge {
+  height: 4px;
+  background: #1e2640;
+  border-radius: 2px;
   overflow: hidden;
 }
-.gauge-fill {
+.kis-gauge-fill {
   height: 100%;
-  border-radius: 100px;
-  transition: width 0.5s ease;
+  border-radius: 2px;
+  transition: width 0.4s ease;
 }
 
-/* Subtle fade-in */
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+/* 한투 섹션 헤더 */
+.kis-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8c919a;
+  padding: 12px 16px 8px;
 }
-.animate-fade-up {
-  animation: fadeUp 0.4s ease forwards;
+
+/* 한투 금액 표시 */
+.kis-amount {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }

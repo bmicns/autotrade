@@ -57,18 +57,21 @@ export default function App() {
   useWebSocket(handleWsMessage);
 
   return (
-    <div className="min-h-dvh pb-24">
-      {/* Apple-style minimal header */}
-      <header className="nav-bar sticky top-0 z-40 border-b border-white/[0.04]">
-        <div className="flex items-center justify-between px-6 h-11">
-          <span className="text-[15px] font-semibold text-white/90 tracking-tight">AutoTrade</span>
+    <div className="min-h-dvh pb-[80px]">
+      {/* 한투 스타일 헤더 */}
+      <header className="kis-header sticky top-0 z-40">
+        <div className="flex items-center justify-between px-[30px] h-[52px]">
           <div className="flex items-center gap-2">
-            <span className="relative flex h-[6px] w-[6px]">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#30d158] opacity-60" />
-              <span className="relative inline-flex rounded-full h-[6px] w-[6px] bg-[#30d158]" />
+            <div className="w-[3px] h-[18px] rounded-full bg-[#ff8a00]" />
+            <span className="text-[16px] font-bold text-white tracking-tight">AutoTrade</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-[7px] w-[7px]">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00c853] opacity-60" />
+              <span className="relative inline-flex rounded-full h-[7px] w-[7px] bg-[#00c853]" />
             </span>
-            <span className="text-white/40 text-[11px] font-medium">
-              {process.env.NODE_ENV === "production" ? "실전" : "모의투자"}
+            <span className="text-[#8c919a] text-[12px] font-medium">
+              {process.env.NODE_ENV === "production" ? "실전투자" : "모의투자"}
             </span>
           </div>
         </div>

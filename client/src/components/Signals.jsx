@@ -1,6 +1,6 @@
 import { api } from "../lib/api";
 
-function formatKRW(n) {
+function fmt(n) {
   return (n || 0).toLocaleString("ko-KR");
 }
 
@@ -17,50 +17,51 @@ export default function Signals({ signals, onRefresh }) {
   }
 
   return (
-    <div className="px-6 pt-10 pb-8 space-y-8 animate-fade-up">
-      <section>
-        <p className="text-white/40 text-[11px] font-semibold uppercase tracking-wider mb-2">분석</p>
-        <h2 className="text-[34px] font-bold text-white tracking-tight leading-none">시그널</h2>
-      </section>
+    <div className="p-[30px] space-y-[20px]">
+      <h2 className="text-[18px] font-bold text-white">시그널</h2>
 
       {(!signals || signals.length === 0) ? (
-        <div className="card py-20 text-center">
-          <p className="text-white/20 text-[15px]">시그널 없음</p>
-          <p className="text-white/10 text-[13px] mt-2">대시보드에서 스캔을 실행하세요</p>
+        <div className="kis-card py-[50px] text-center">
+          <p className="text-[#8c919a] text-[13px]">시그널 없음</p>
+          <p className="text-[#8c919a]/60 text-[11px] mt-[4px]">홈에서 스캔을 실행하세요</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="kis-card overflow-hidden">
+          <div className="px-[16px] py-[12px]">
+            <span className="text-[13px] font-bold text-white">분석 결과</span>
+            <span className="text-[11px] text-[#8c919a] ml-[8px]">{signals.length}건</span>
+          </div>
           {signals.map((sig, i) => (
-            <div key={i} className="card p-5">
+            <div key={i} className="px-[16px] py-[14px] border-t border-[#1e2640]">
               <div className="flex justify-between items-start">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2.5">
-                    <p className="text-white font-semibold text-[17px] tracking-tight truncate">{sig.name}</p>
-                    <span className={`shrink-0 px-2.5 py-[3px] rounded-full text-[11px] font-bold ${
-                      sig.action === "buy" ? "bg-[#30d158]/15 text-[#30d158]" :
-                      sig.action === "sell" ? "bg-[#ff453a]/15 text-[#ff453a]" :
-                      "bg-white/[0.06] text-white/30"
+                  <div className="flex items-center gap-[8px]">
+                    <p className="text-[14px] font-semibold text-white truncate">{sig.name}</p>
+                    <span className={`badge ${
+                      sig.action === "buy" ? "bg-up c-up" :
+                      sig.action === "sell" ? "bg-down c-down" :
+                      "bg-[#1e2640] text-[#8c919a]"
                     }`}>
                       {sig.action === "buy" ? "매수" : sig.action === "sell" ? "매도" : "관망"}
                     </span>
                   </div>
-                  <p className="text-white/30 text-[13px] mt-1.5">
-                    {formatKRW(sig.price)}원 · 신뢰도 {sig.confidence}%
-                    {sig.autoExecute ? " · 자동실행" : ""}
+                  <p className="text-[12px] text-[#8c919a] mt-[4px]">
+                    {fmt(sig.price)}원 · 신뢰도 {sig.confidence}%
+                    {sig.autoExecute ? " · 자동" : ""}
                   </p>
                   {sig.momentum && (
-                    <p className="text-[#ff9f0a] text-[12px] font-medium mt-1">
+                    <span className="badge bg-[#ff8a00]/15 text-[#ff8a00] mt-[4px]">
                       모멘텀 {sig.momentum.score}/5
-                    </p>
+                    </span>
                   )}
                 </div>
                 {sig.action !== "hold" && !sig.autoExecute && (
                   <button
                     onClick={() => handleApprove(sig)}
-                    className={`shrink-0 ml-4 px-5 py-2.5 rounded-full text-[13px] font-bold active:scale-[0.97] transition-transform ${
+                    className={`shrink-0 ml-[12px] px-[14px] py-[8px] rounded-[6px] text-[12px] font-bold active:scale-[0.98] transition-transform ${
                       sig.action === "buy"
-                        ? "bg-[#30d158] text-black"
-                        : "bg-[#ff453a] text-white"
+                        ? "bg-[#ff2f2f] text-white"
+                        : "bg-[#2b83ff] text-white"
                     }`}
                   >
                     승인
@@ -69,12 +70,12 @@ export default function Signals({ signals, onRefresh }) {
               </div>
 
               {sig.strategies && (
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-[10px] flex flex-wrap gap-[6px]">
                   {Object.entries(sig.strategies).map(([key, val]) => (
-                    <span key={key} className={`px-2.5 py-1 rounded-full text-[10px] font-semibold ${
-                      val.signal === "buy" ? "bg-[#30d158]/10 text-[#30d158]" :
-                      val.signal === "sell" ? "bg-[#ff453a]/10 text-[#ff453a]" :
-                      "bg-white/[0.04] text-white/20"
+                    <span key={key} className={`badge ${
+                      val.signal === "buy" ? "bg-up c-up" :
+                      val.signal === "sell" ? "bg-down c-down" :
+                      "bg-[#1e2640] text-[#8c919a]"
                     }`}>
                       {key.toUpperCase()}
                     </span>
