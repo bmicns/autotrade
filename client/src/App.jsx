@@ -57,42 +57,30 @@ export default function App() {
   useWebSocket(handleWsMessage);
 
   return (
-    <div className="min-h-dvh pb-20">
-      {/* Header */}
-      <header className="glass-nav sticky top-0 z-40 border-b border-white/[0.06]">
-        <div className="flex items-center justify-between px-5 py-3.5">
-          <h1 className="text-[17px] font-semibold text-white tracking-tight">AutoTrade</h1>
+    <div className="min-h-dvh pb-24">
+      {/* Apple-style minimal header */}
+      <header className="nav-bar sticky top-0 z-40 border-b border-white/[0.04]">
+        <div className="flex items-center justify-between px-6 h-11">
+          <span className="text-[15px] font-semibold text-white/90 tracking-tight">AutoTrade</span>
           <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#34c759] opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#34c759]" />
+            <span className="relative flex h-[6px] w-[6px]">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#30d158] opacity-60" />
+              <span className="relative inline-flex rounded-full h-[6px] w-[6px] bg-[#30d158]" />
             </span>
-            <span className="text-[#86868b] text-xs font-medium">
+            <span className="text-white/40 text-[11px] font-medium">
               {process.env.NODE_ENV === "production" ? "실전" : "모의투자"}
             </span>
           </div>
         </div>
       </header>
 
-      {/* Content */}
       {tab === "dashboard" && (
-        <Dashboard
-          balance={balance}
-          positions={positions}
-          stats={stats}
-          onRefresh={fetchAll}
-        />
+        <Dashboard balance={balance} positions={positions} stats={stats} onRefresh={fetchAll} />
       )}
       {tab === "momentum" && (
-        <Momentum
-          positions={positions}
-          closedPositions={closedPositions}
-          onRefresh={fetchAll}
-        />
+        <Momentum positions={positions} closedPositions={closedPositions} onRefresh={fetchAll} />
       )}
-      {tab === "signals" && (
-        <Signals signals={signals} onRefresh={fetchAll} />
-      )}
+      {tab === "signals" && <Signals signals={signals} onRefresh={fetchAll} />}
       {tab === "trades" && <Trades trades={trades} />}
       {tab === "balance" && <Balance balance={balance} />}
 
