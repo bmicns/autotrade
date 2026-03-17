@@ -122,3 +122,8 @@ body {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
 }
+
+/* 전체 30px 여백 */
+.page-padding {
+  padding: 30px;
+}

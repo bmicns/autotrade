@@ -4,7 +4,7 @@ function fmt(n) {
 
 export default function Balance({ balance }) {
   return (
-    <div className="p-[30px] space-y-[20px]">
+    <div className="page-padding space-y-[20px]">
       <h2 className="text-[18px] font-bold text-white">잔고</h2>
 
       {/* 자산 요약 */}

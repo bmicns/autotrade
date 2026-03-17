@@ -17,7 +17,7 @@ export default function Signals({ signals, onRefresh }) {
   }
 
   return (
-    <div className="p-[30px] space-y-[20px]">
+    <div className="page-padding space-y-[20px]">
       <h2 className="text-[18px] font-bold text-white">시그널</h2>
 
       {(!signals || signals.length === 0) ? (

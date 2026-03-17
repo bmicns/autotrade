@@ -23,7 +23,7 @@ export default function Dashboard({ balance, positions, stats, onRefresh }) {
   const profit = stats?.totalProfit || 0;
 
   return (
-    <div className="p-[30px] space-y-[20px]">
+    <div className="page-padding space-y-[20px]">
       {/* 계좌 총자산 */}
       <div className="kis-card p-[20px]">
         <div className="flex items-center justify-between mb-[16px]">

@@ -4,7 +4,7 @@ function fmt(n) {
 
 export default function Trades({ trades }) {
   return (
-    <div className="p-[30px] space-y-[20px]">
+    <div className="page-padding space-y-[20px]">
       <h2 className="text-[18px] font-bold text-white">매매이력</h2>
 
       {(!trades || trades.length === 0) ? (

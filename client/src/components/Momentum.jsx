@@ -33,7 +33,7 @@ export default function Momentum({ positions, closedPositions, onRefresh }) {
   }
 
   return (
-    <div className="p-[30px] space-y-[20px]">
+    <div className="page-padding space-y-[20px]">
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <h2 className="text-[18px] font-bold text-white">모멘텀 전략</h2>
