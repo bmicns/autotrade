@@ -32,8 +32,9 @@ export function TopBar() {
       {isHome && (
         <button
           onClick={toggleAutoTrade}
-          className="flex items-center gap-2 rounded-full px-6 py-[6px] transition-all"
+          className="flex items-center gap-2 rounded-full transition-all"
           style={{
+            padding: "6px 15px",
             background: autoTrade ? COLORS.rise : "rgba(255,255,255,0.1)",
             border: `1px solid ${autoTrade ? COLORS.rise : "rgba(255,255,255,0.15)"}`,
           }}

@@ -29,7 +29,7 @@ export function SideBar() {
       </div>
 
       {/* 네비게이션 — CLIO 간격 통일 */}
-      <nav className="flex-1 flex flex-col overflow-y-auto" style={{ gap: 12, paddingLeft: 20, paddingRight: 12, paddingTop: 40, paddingBottom: 20 }}>
+      <nav className="flex-1 flex flex-col overflow-y-auto" style={{ gap: 12, paddingLeft: 20, paddingRight: 12, paddingTop: 15, paddingBottom: 20 }}>
         {TABS.map((t) => {
           const on = tab === t.id;
           return (
