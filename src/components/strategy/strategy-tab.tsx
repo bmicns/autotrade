@@ -23,7 +23,7 @@ export function StrategyTab() {
     <div>
       {/* 현재 전략 파라미터 */}
       <div style={{ padding: "20px 20px 10px" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>자동매매 전략</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>자동매매 전략</span>
       </div>
       <div style={{ padding: "0 20px" }}>
         {params.map((p, i) => (
@@ -38,7 +38,7 @@ export function StrategyTab() {
 
       {/* 분석 지표 */}
       <div style={{ padding: "20px 20px 10px" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>분석 지표 (5종)</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>분석 지표 (5종)</span>
       </div>
       <div style={{ padding: "0 20px 16px" }}>
         {["RSI — 과매수·과매도", "MACD — 추세 전환", "이동평균 — 5일/20일 크로스", "볼린저밴드 — 변동성", "거래량 — 20일 평균 대비"].map((ind, i) => (
@@ -52,7 +52,7 @@ export function StrategyTab() {
 
       {/* 엔진 상태 */}
       <div style={{ padding: "20px 20px 10px" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>엔진 상태</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>엔진 상태</span>
       </div>
       <div style={{ padding: "0 20px 20px" }}>
         <div style={{ padding: "14px 16px", borderRadius: 12, background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>

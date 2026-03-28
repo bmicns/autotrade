@@ -35,7 +35,7 @@ export function StatsTab() {
   return (
     <div>
       <div style={{ padding: "20px 20px 10px" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>매매 이력</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>매매 이력</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "0 16px 16px" }}>
         {[
@@ -56,7 +56,7 @@ export function StatsTab() {
 
       {/* 최근 체결 */}
       <div style={{ padding: "20px 20px 10px" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>최근 체결</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>최근 체결</span>
       </div>
       {executed.slice(0, 10).map((t) => (
         <div key={t.id}>

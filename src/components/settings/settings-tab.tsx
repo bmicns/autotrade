@@ -14,7 +14,7 @@ const TRADE_GROUPS = [
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "10px 14px", borderRadius: 10,
   border: `1.5px solid ${COLORS.line}`, background: COLORS.sub,
-  color: COLORS.ink, fontSize: 14, fontFamily: "inherit", outline: "none", letterSpacing: "-0.3px",
+  color: COLORS.ink, fontSize: 14, fontFamily: "inherit", outline: "none", letterSpacing: "normal",
 };
 
 export function SettingsTab() {
@@ -62,7 +62,7 @@ export function SettingsTab() {
     <div>
       {/* KIS API 연결 */}
       <div style={{ padding: "20px 20px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>KIS 모의투자 API</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>KIS 모의투자 API</span>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: hasToken ? "#22C55E" : hasKey ? "#F59E0B" : COLORS.dim }} />
           <span style={{ fontSize: 10, fontWeight: 600, color: hasToken ? "#22C55E" : hasKey ? "#F59E0B" : COLORS.dim }}>
@@ -122,7 +122,7 @@ export function SettingsTab() {
       {TRADE_GROUPS.map((sec, si) => (
         <div key={si}>
           <div style={{ padding: "20px 20px 10px" }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>{sec.title}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>{sec.title}</span>
           </div>
           {sec.rows.map((r, ri) => (
             <div key={ri}>

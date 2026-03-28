@@ -100,7 +100,7 @@ export function HomeTab() {
 
       {/* ── 보유 종목 ── */}
       <div style={{ padding: "20px 20px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>
           보유 종목 ({holdings.length})
         </span>
       </div>
@@ -154,7 +154,7 @@ export function HomeTab() {
 
       {/* ── 시장 뉴스 ── */}
       <div style={{ padding: "20px 20px 10px" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" }}>시장 뉴스</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>시장 뉴스</span>
       </div>
       <div style={{ padding: "20px 20px 40px", textAlign: "center" }}>
         <span style={{ fontSize: 14, color: COLORS.dim }}>정보 없음</span>

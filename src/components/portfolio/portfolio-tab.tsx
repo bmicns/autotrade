@@ -59,7 +59,7 @@ export function PortfolioTab() {
           </div>
         </div>
         <div>
-          <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>총 평가금액</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>총 평가금액</span>
           <div style={{ marginTop: 6 }}>
             <span style={{ fontSize: 18, fontWeight: 800, color: COLORS.ink, fontVariantNumeric: "tabular-nums" }}>{Math.round(total).toLocaleString("ko-KR")}</span>
             <span style={{ fontSize: 12, color: COLORS.mid }}> 원</span>
@@ -79,7 +79,7 @@ export function PortfolioTab() {
 
       {/* 보유 종목 */}
       <div style={{ padding: "20px 20px 10px" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>보유 종목 ({enriched.length})</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>보유 종목 ({enriched.length})</span>
       </div>
       {enriched.map((h) => (
         <div key={h.code}>
