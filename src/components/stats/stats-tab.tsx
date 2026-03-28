@@ -9,10 +9,10 @@ export function StatsTab() {
   return (
     <div>
       {/* 이번 달 성과 */}
-      <div className="flex items-center justify-between px-5 pb-2.5 pt-5">
-        <span className="text-xs font-bold uppercase tracking-tight" style={{ color: COLORS.dim }}>이번 달 성과</span>
+      <div style={{ padding: "20px 20px 10px" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>이번 달 성과</span>
       </div>
-      <div className="grid grid-cols-3 gap-2 px-4 pb-4">
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "0 16px 16px" }}>
         {[
           { l: "승률", v: `${s.winRate}%`, c: COLORS.ink },
           { l: "손익비", v: `${s.profitFactor}`, c: s.profitFactor >= 1 ? COLORS.rise : COLORS.fall },
@@ -21,51 +21,48 @@ export function StatsTab() {
           { l: "평균수익", v: `+${s.avgProfit}%`, c: COLORS.rise },
           { l: "평균손실", v: `-${s.avgLoss}%`, c: COLORS.fall },
         ].map((item, i) => (
-          <div key={i} className="rounded-[10px] p-3.5" style={{ background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>
-            <span className="text-xs" style={{ color: COLORS.dim }}>{item.l}</span>
-            <div className="mt-2">
-              <span className="text-sm font-extrabold tabular-nums" style={{ color: item.c }}>{item.v}</span>
+          <div key={i} style={{ background: COLORS.sub, borderRadius: 10, padding: 14, border: `1px solid ${COLORS.line}` }}>
+            <span style={{ fontSize: 12, color: COLORS.dim }}>{item.l}</span>
+            <div style={{ marginTop: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 800, color: item.c, fontVariantNumeric: "tabular-nums" }}>{item.v}</span>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="h-px" style={{ background: COLORS.line }} />
+      <div style={{ height: 1, background: COLORS.line }} />
 
       {/* 지표별 기여도 */}
-      <div className="flex items-center justify-between px-5 pb-2.5 pt-5">
-        <span className="text-xs font-bold uppercase tracking-tight" style={{ color: COLORS.dim }}>지표별 기여도</span>
+      <div style={{ padding: "20px 20px 10px" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>지표별 기여도</span>
       </div>
-      <div className="flex flex-col gap-3 px-5 pb-4">
+      <div style={{ padding: "0 20px 16px", display: "flex", flexDirection: "column" as const, gap: 12 }}>
         {s.indicators.map((ind, i) => (
           <div key={i}>
-            <div className="mb-1.5 flex justify-between">
-              <span className="text-sm font-semibold" style={{ color: COLORS.ink }}>{ind.name}</span>
-              <span className="text-sm font-bold" style={{ color: COLORS.rise }}>{ind.value}%</span>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.ink }}>{ind.name}</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.rise }}>{ind.value}%</span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-[3px]" style={{ background: COLORS.line }}>
-              <div
-                className="h-full rounded-[3px]"
-                style={{ width: `${(ind.value / maxV) * 100}%`, background: `linear-gradient(to right, ${COLORS.rise}, ${COLORS.rise}BB)` }}
-              />
+            <div style={{ height: 6, background: COLORS.line, borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${(ind.value / maxV) * 100}%`, background: `linear-gradient(to right, ${COLORS.rise}, ${COLORS.rise}BB)`, borderRadius: 3 }} />
             </div>
           </div>
         ))}
       </div>
 
-      <div className="h-px" style={{ background: COLORS.line }} />
+      <div style={{ height: 1, background: COLORS.line }} />
 
       {/* 섹터별 승률 */}
-      <div className="flex items-center justify-between px-5 pb-2.5 pt-5">
-        <span className="text-xs font-bold uppercase tracking-tight" style={{ color: COLORS.dim }}>섹터별 승률</span>
+      <div style={{ padding: "20px 20px 10px" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>섹터별 승률</span>
       </div>
-      <div className="flex flex-col gap-2 px-4 pb-4">
+      <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column" as const, gap: 8 }}>
         {s.sectors.map((sec, i) => (
-          <div key={i} className="flex items-center justify-between rounded-[10px] px-4 py-3" style={{ background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>
-            <span className="text-xs font-semibold" style={{ color: COLORS.ink }}>{sec.name}</span>
-            <div className="flex items-center gap-3">
-              <span className="text-xs" style={{ color: COLORS.dim }}>{sec.trades}회</span>
-              <span className="text-sm font-bold tabular-nums" style={{ color: sec.winRate >= 60 ? COLORS.rise : COLORS.mid }}>{sec.winRate}%</span>
+          <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: COLORS.sub, borderRadius: 10, border: `1px solid ${COLORS.line}` }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.ink }}>{sec.name}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 12, color: COLORS.dim }}>{sec.trades}회</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: sec.winRate >= 60 ? COLORS.rise : COLORS.mid, fontVariantNumeric: "tabular-nums" }}>{sec.winRate}%</span>
             </div>
           </div>
         ))}

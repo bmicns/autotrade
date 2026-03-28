@@ -11,17 +11,10 @@ const TRADE_GROUPS = [
   { title: "시간대 필터", rows: [{ l: "오전 세션", i: "clock" as const, r: "09:30~11:30" }, { l: "오후 세션", i: "clock" as const, r: "13:00~14:50" }] },
 ];
 
-const inputStyle = {
-  width: "100%",
-  padding: "10px 12px",
-  borderRadius: 8,
-  border: `1.5px solid ${COLORS.line}`,
-  background: COLORS.sub,
-  color: COLORS.ink,
-  fontSize: 13,
-  fontFamily: "inherit",
-  outline: "none",
-  letterSpacing: "-0.5px",
+const inputStyle: React.CSSProperties = {
+  width: "100%", padding: "10px 12px", borderRadius: 8,
+  border: `1.5px solid ${COLORS.line}`, background: COLORS.sub,
+  color: COLORS.ink, fontSize: 13, fontFamily: "inherit", outline: "none", letterSpacing: "-0.5px",
 };
 
 export function SettingsTab() {
@@ -49,30 +42,17 @@ export function SettingsTab() {
   };
 
   const handleTest = async () => {
-    if (!appKey || !appSecret) {
-      setTestResult("App Key와 App Secret을 입력하세요");
-      return;
-    }
-    setTesting(true);
-    setTestResult(null);
+    if (!appKey || !appSecret) { setTestResult("App Key와 App Secret을 입력하세요"); return; }
+    setTesting(true); setTestResult(null);
     try {
-      const res = await fetch("/api/kis/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ appKey, appSecret }),
-      });
+      const res = await fetch("/api/kis/token", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appKey, appSecret }) });
       const data = await res.json();
       if (data.token) {
         setKISConfig({ appKey, appSecret, accountNo, token: data.token, tokenExpiry: new Date(Date.now() + 86400000).toISOString() });
         setTestResult("연결 성공! 토큰 발급 완료");
-      } else {
-        setTestResult(`실패: ${data.error || "알 수 없는 오류"}`);
-      }
-    } catch {
-      setTestResult("네트워크 오류 — KIS 서버 연결 실패");
-    } finally {
-      setTesting(false);
-    }
+      } else { setTestResult(`실패: ${data.error || "알 수 없는 오류"}`); }
+    } catch { setTestResult("네트워크 오류 — KIS 서버 연결 실패"); }
+    finally { setTesting(false); }
   };
 
   const hasKey = !!kisConfig.appKey;
@@ -81,128 +61,91 @@ export function SettingsTab() {
   return (
     <div>
       {/* KIS API 연결 */}
-      <div className="flex items-center justify-between px-5 pb-2.5 pt-5">
-        <span className="text-xs font-bold uppercase tracking-tight" style={{ color: COLORS.dim }}>KIS 모의투자 API</span>
-        <div className="flex items-center gap-1.5">
-          <span
-            className="h-2 w-2 rounded-full"
-            style={{ background: hasToken ? "#22C55E" : hasKey ? "#F59E0B" : COLORS.dim }}
-          />
-          <span className="text-[10px] font-semibold" style={{ color: hasToken ? "#22C55E" : hasKey ? "#F59E0B" : COLORS.dim }}>
+      <div style={{ padding: "20px 20px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>KIS 모의투자 API</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: hasToken ? "#22C55E" : hasKey ? "#F59E0B" : COLORS.dim }} />
+          <span style={{ fontSize: 10, fontWeight: 600, color: hasToken ? "#22C55E" : hasKey ? "#F59E0B" : COLORS.dim }}>
             {hasToken ? "연결됨" : hasKey ? "키 저장됨" : "미설정"}
           </span>
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 px-5 pb-4">
+      <div style={{ padding: "0 20px 16px", display: "flex", flexDirection: "column" as const, gap: 12 }}>
         <div>
-          <label className="mb-1.5 block text-[11px] font-semibold" style={{ color: COLORS.mid }}>App Key</label>
-          <input
-            type="text"
-            value={appKey}
-            onChange={(e) => setAppKey(e.target.value)}
-            placeholder="KIS Developers에서 발급받은 앱키"
-            style={inputStyle}
-          />
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>App Key</label>
+          <input type="text" value={appKey} onChange={(e) => setAppKey(e.target.value)} placeholder="KIS Developers에서 발급받은 앱키" style={inputStyle} />
         </div>
         <div>
-          <label className="mb-1.5 block text-[11px] font-semibold" style={{ color: COLORS.mid }}>App Secret</label>
-          <input
-            type="password"
-            value={appSecret}
-            onChange={(e) => setAppSecret(e.target.value)}
-            placeholder="KIS Developers에서 발급받은 시크릿"
-            style={inputStyle}
-          />
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>App Secret</label>
+          <input type="password" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder="KIS Developers에서 발급받은 시크릿" style={inputStyle} />
         </div>
         <div>
-          <label className="mb-1.5 block text-[11px] font-semibold" style={{ color: COLORS.mid }}>계좌번호</label>
-          <input
-            type="text"
-            value={accountNo}
-            onChange={(e) => setAccountNo(e.target.value)}
-            placeholder="모의투자 계좌번호 (예: 5012345601)"
-            style={inputStyle}
-          />
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>계좌번호</label>
+          <input type="text" value={accountNo} onChange={(e) => setAccountNo(e.target.value)} placeholder="모의투자 계좌번호 (예: 5012345601)" style={inputStyle} />
         </div>
 
-        <div className="flex gap-2">
-          <button
-            onClick={handleSave}
-            className="flex-1 rounded-lg py-2.5 text-xs font-bold transition-all"
-            style={{
-              background: saved ? "#22C55E" : COLORS.ink,
-              color: "#fff",
-              border: "none",
-            }}
-          >
-            {saved ? "✓ 저장됨" : "저장"}
-          </button>
-          <button
-            onClick={handleTest}
-            disabled={testing}
-            className="flex-1 rounded-lg py-2.5 text-xs font-semibold transition-all"
-            style={{
-              background: "transparent",
-              color: COLORS.rise,
-              border: `1.5px solid ${COLORS.rise}`,
-              opacity: testing ? 0.5 : 1,
-            }}
-          >
-            {testing ? "테스트 중..." : "연결 테스트"}
-          </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={handleSave} style={{
+            flex: 1, padding: "10px 0", borderRadius: 8, border: "none",
+            background: saved ? "#22C55E" : COLORS.ink, color: "#fff",
+            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+          }}>{saved ? "✓ 저장됨" : "저장"}</button>
+          <button onClick={handleTest} disabled={testing} style={{
+            flex: 1, padding: "10px 0", borderRadius: 8,
+            background: "transparent", color: COLORS.rise,
+            border: `1.5px solid ${COLORS.rise}`,
+            fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+            opacity: testing ? 0.5 : 1,
+          }}>{testing ? "테스트 중..." : "연결 테스트"}</button>
         </div>
 
         {testResult && (
-          <div
-            className="rounded-lg px-3 py-2.5 text-xs font-medium"
-            style={{
-              background: testResult.includes("성공") ? "#F0FDF4" : "#FEF2F2",
-              color: testResult.includes("성공") ? "#16A34A" : "#DC2626",
-              border: `1px solid ${testResult.includes("성공") ? "#BBF7D0" : "#FECACA"}`,
-            }}
-          >
-            {testResult}
-          </div>
+          <div style={{
+            borderRadius: 8, padding: "10px 12px", fontSize: 12, fontWeight: 500,
+            background: testResult.includes("성공") ? "#F0FDF4" : "#FEF2F2",
+            color: testResult.includes("성공") ? "#16A34A" : "#DC2626",
+            border: `1px solid ${testResult.includes("성공") ? "#BBF7D0" : "#FECACA"}`,
+          }}>{testResult}</div>
         )}
 
-        <div className="rounded-lg p-3" style={{ background: `${COLORS.fall}08`, border: `1px solid ${COLORS.fall}15` }}>
-          <span className="text-[11px] leading-relaxed" style={{ color: COLORS.mid }}>
+        <div style={{ borderRadius: 8, padding: 12, background: `${COLORS.fall}08`, border: `1px solid ${COLORS.fall}15` }}>
+          <span style={{ fontSize: 11, lineHeight: 1.6, color: COLORS.mid }}>
             KIS Developers (apiportal.koreainvestment.com)에서 모의투자용 앱키를 발급받으세요. 키는 브라우저 로컬에만 저장됩니다.
           </span>
         </div>
       </div>
 
-      <div className="h-px" style={{ background: COLORS.line }} />
+      <div style={{ height: 1, background: COLORS.line }} />
 
-      {/* 매매 설정 그룹 */}
+      {/* 매매 설정 */}
       {TRADE_GROUPS.map((sec, si) => (
         <div key={si}>
-          <div className="flex items-center justify-between px-5 pb-2.5 pt-5">
-            <span className="text-xs font-bold uppercase tracking-tight" style={{ color: COLORS.dim }}>{sec.title}</span>
+          <div style={{ padding: "20px 20px 10px" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>{sec.title}</span>
           </div>
           {sec.rows.map((r, ri) => (
             <div key={ri}>
-              <div className="flex cursor-pointer items-center justify-between px-5 py-3.5">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", cursor: "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: COLORS.sub, border: `1px solid ${COLORS.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <Icon name={r.i} size={16} color={COLORS.mid} strokeWidth={1.5} />
                   </div>
-                  <span className="text-xs font-medium" style={{ color: COLORS.ink }}>{r.l}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: COLORS.ink }}>{r.l}</span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs" style={{ color: COLORS.mid }}>{r.r}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: COLORS.mid }}>{r.r}</span>
                   <Icon name="cr" size={16} color={COLORS.dim} strokeWidth={1.4} />
                 </div>
               </div>
-              <div className="h-px" style={{ background: COLORS.line }} />
+              <div style={{ height: 1, background: COLORS.line }} />
             </div>
           ))}
         </div>
       ))}
 
-      <div className="py-7 text-center">
-        <span className="text-xs" style={{ color: COLORS.dim }}>NEXIO v2.0 · Vercel + Supabase</span>
+      <div style={{ padding: "28px 20px", textAlign: "center" }}>
+        <span style={{ fontSize: 12, color: COLORS.dim }}>NEXIO v2.3 · Vercel + Supabase</span>
       </div>
     </div>
   );

@@ -25,16 +25,16 @@ export function StrategyTab() {
   return (
     <div>
       {/* 현재 전략 파라미터 */}
-      <div className="flex items-center justify-between px-5 pb-2.5 pt-5">
-        <span className="text-xs font-bold uppercase tracking-tight" style={{ color: COLORS.dim }}>현재 전략 파라미터</span>
+      <div style={{ padding: "20px 20px 10px" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>현재 전략 파라미터</span>
       </div>
-      <div className="px-5">
+      <div style={{ padding: "0 20px" }}>
         {PARAMS.map((p, i) => (
-          <div key={i} className="flex items-center justify-between py-[13px]" style={{ borderTop: `1px solid ${COLORS.line}` }}>
-            <span className="text-xs font-medium" style={{ color: COLORS.ink }}>{p.name}</span>
-            <div className="flex items-center gap-2">
-              {p.changed && <span className="text-xs line-through" style={{ color: COLORS.dim }}>{p.cur}</span>}
-              <span className="text-xs font-bold" style={{ color: p.changed ? COLORS.rise : COLORS.ink }}>{p.sug}</span>
+          <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 0", borderTop: `1px solid ${COLORS.line}` }}>
+            <span style={{ fontSize: 14, fontWeight: 500, color: COLORS.ink }}>{p.name}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {p.changed && <span style={{ fontSize: 12, color: COLORS.dim, textDecoration: "line-through" }}>{p.cur}</span>}
+              <span style={{ fontSize: 14, fontWeight: 700, color: p.changed ? COLORS.rise : COLORS.ink }}>{p.sug}</span>
               {p.changed && <Badge label="변경 제안" tone="rise" />}
             </div>
           </div>
@@ -42,42 +42,48 @@ export function StrategyTab() {
       </div>
 
       {/* Claude 전략 개선안 */}
-      <div className="mx-4 mt-4 rounded-xl p-4" style={{ background: `${COLORS.fall}08`, border: `1px solid ${COLORS.fall}30` }}>
-        <div className="mb-2.5 flex items-center gap-2">
-          <span className="text-sm font-bold" style={{ color: COLORS.fall }}>3월 Claude 전략 개선안</span>
+      <div style={{ margin: "16px 16px 0", padding: 16, borderRadius: 12, background: `${COLORS.fall}08`, border: `1px solid ${COLORS.fall}30` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.fall }}>3월 Claude 전략 개선안</span>
           <Badge label="승인 대기" tone="gold" />
         </div>
-        <span className="text-sm leading-relaxed" style={{ color: COLORS.mid }}>
+        <span style={{ fontSize: 14, color: COLORS.mid, lineHeight: 1.65 }}>
           RSI 28~30 구간 반등 성공률 74% 집계. 기준값 30→28 조정 시 진입 타이밍 개선. 거래량 기준 200%→180% 완화 시 놓치는 신호 약 12% 감소.
         </span>
-        <div className="mt-3.5 flex gap-2">
+        <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
           {!approved ? (
             <>
-              <button className="flex-1 rounded-lg border py-3 text-[11px] font-semibold" style={{ borderColor: COLORS.lineD, color: COLORS.mid, background: "transparent" }}>
-                거절
-              </button>
-              <button onClick={() => setApproved(true)} className="flex-[2] rounded-lg border-none py-3 text-[11px] font-bold text-white" style={{ background: COLORS.ink }}>
-                승인 · 파라미터 적용
-              </button>
+              <button style={{
+                flex: 1, padding: "12px 0", borderRadius: 8,
+                border: `1px solid ${COLORS.lineD}`, background: "transparent",
+                fontSize: 11, fontWeight: 600, color: COLORS.mid, cursor: "pointer", fontFamily: "inherit",
+              }}>거절</button>
+              <button onClick={() => setApproved(true)} style={{
+                flex: 2, padding: "12px 0", borderRadius: 8,
+                border: "none", background: COLORS.ink, color: "#fff",
+                fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+              }}>승인 · 파라미터 적용</button>
             </>
           ) : (
-            <div className="flex-1 rounded-lg p-3 text-center" style={{ background: COLORS.riseL, border: `1px solid ${COLORS.riseB}` }}>
-              <span className="text-xs font-bold" style={{ color: COLORS.rise }}>✓ 파라미터 업데이트 완료</span>
+            <div style={{ flex: 1, padding: 12, borderRadius: 8, textAlign: "center", background: COLORS.riseL, border: `1px solid ${COLORS.riseB}` }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.rise }}>✓ 파라미터 업데이트 완료</span>
             </div>
           )}
         </div>
       </div>
 
       {/* 버전 이력 */}
-      <div className="flex items-center justify-between px-5 pb-2.5 pt-5">
-        <span className="text-xs font-bold uppercase tracking-tight" style={{ color: COLORS.dim }}>버전 이력</span>
+      <div style={{ padding: "20px 20px 10px" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>버전 이력</span>
       </div>
-      <div className="px-5 pb-4">
+      <div style={{ padding: "0 20px 16px" }}>
         {VERSIONS.map((item, i) => (
-          <div key={i} className="flex items-center justify-between py-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+          <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderTop: `1px solid ${COLORS.line}` }}>
             <div>
-              <span className="text-xs font-bold" style={{ color: COLORS.ink }}>{item.v}</span>
-              <div className="mt-0.5"><span className="text-xs" style={{ color: COLORS.dim }}>{item.d} · {item.n}</span></div>
+              <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink }}>{item.v}</span>
+              <div style={{ marginTop: 3 }}>
+                <span style={{ fontSize: 12, color: COLORS.dim }}>{item.d} · {item.n}</span>
+              </div>
             </div>
             <Icon name="cr" size={16} color={COLORS.dim} strokeWidth={1.4} />
           </div>

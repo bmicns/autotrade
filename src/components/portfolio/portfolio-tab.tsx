@@ -13,44 +13,35 @@ export function PortfolioTab() {
     const real = prices.get(h.code);
     const stock = DUMMY_STOCKS.find((s) => s.code === h.code);
     const cur = real?.price ?? stock?.price ?? 0;
-    const chgRate = real?.changeRate ?? stock?.change ?? 0;
     const pct = h.avgPrice > 0 ? ((cur - h.avgPrice) / h.avgPrice) * 100 : 0;
-    return { ...h, cur, pct, chgRate, up: pct >= 0, history: stock?.history ?? [cur] };
+    return { ...h, cur, pct, up: pct >= 0, history: stock?.history ?? [cur] };
   });
 
   const total = enriched.reduce((s, h) => s + h.cur * h.quantity, 0);
-
-  // 국내만이라 섹터별 비중으로 표시
-  const sectors = [
-    { name: "반도체", ratio: 65 },
-    { name: "IT/플랫폼", ratio: 20 },
-    { name: "기타", ratio: 15 },
-  ];
+  const sectors = [{ name: "반도체", ratio: 65 }, { name: "IT/플랫폼", ratio: 20 }, { name: "기타", ratio: 15 }];
 
   return (
     <div>
       {/* 요약 */}
-      <div className="flex items-center gap-5 border-b px-5 py-5" style={{ borderColor: COLORS.line }}>
-        <div className="relative shrink-0">
+      <div style={{ padding: 20, display: "flex", gap: 20, alignItems: "center", borderBottom: `1px solid ${COLORS.line}` }}>
+        <div style={{ position: "relative", flexShrink: 0 }}>
           <Donut ratio={65} />
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-            <span className="text-xs font-extrabold" style={{ color: COLORS.rise }}>65%</span>
-            <div className="mt-px"><span className="text-[10px]" style={{ color: COLORS.dim }}>반도체</span></div>
+          <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center" }}>
+            <span style={{ fontSize: 12, fontWeight: 800, color: COLORS.rise }}>65%</span>
+            <div style={{ marginTop: 1 }}><span style={{ fontSize: 10, color: COLORS.dim }}>반도체</span></div>
           </div>
         </div>
         <div>
-          <span className="text-xs font-semibold uppercase tracking-tight" style={{ color: COLORS.dim }}>총 평가금액</span>
-          <div className="mt-1.5">
-            <span className="text-lg font-extrabold tabular-nums" style={{ color: COLORS.ink }}>
-              {Math.round(total).toLocaleString("ko-KR")}
-            </span>
-            <span className="text-xs" style={{ color: COLORS.mid }}> 원</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>총 평가금액</span>
+          <div style={{ marginTop: 6 }}>
+            <span style={{ fontSize: 18, fontWeight: 800, color: COLORS.ink, fontVariantNumeric: "tabular-nums" }}>{Math.round(total).toLocaleString("ko-KR")}</span>
+            <span style={{ fontSize: 12, color: COLORS.mid }}> 원</span>
           </div>
-          <div className="mt-2.5 flex gap-5">
+          <div style={{ marginTop: 10, display: "flex", gap: 20 }}>
             {sectors.map((sec) => (
               <div key={sec.name}>
-                <span className="text-xs" style={{ color: COLORS.dim }}>{sec.name}</span>
-                <div><span className="text-xs font-bold" style={{ color: COLORS.rise }}>{sec.ratio}%</span></div>
+                <span style={{ fontSize: 12, color: COLORS.dim }}>{sec.name}</span>
+                <div><span style={{ fontSize: 12, fontWeight: 700, color: COLORS.rise }}>{sec.ratio}%</span></div>
               </div>
             ))}
           </div>
@@ -58,50 +49,52 @@ export function PortfolioTab() {
       </div>
 
       {/* 보유 종목 */}
-      <div className="flex items-center justify-between px-5 pb-2.5 pt-5">
-        <span className="text-xs font-bold uppercase tracking-tight" style={{ color: COLORS.dim }}>보유 종목 ({enriched.length})</span>
+      <div style={{ padding: "20px 20px 10px" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>보유 종목 ({enriched.length})</span>
       </div>
       {enriched.map((h) => (
         <div key={h.code}>
-          <div className="flex items-center justify-between px-5 py-3.5">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <div
-                className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[10px]"
-                style={{ background: h.up ? COLORS.riseL : COLORS.fallL, border: `1.5px solid ${h.up ? COLORS.riseB : COLORS.fallB}` }}
-              >
-                <span className="text-xs font-extrabold" style={{ color: h.up ? COLORS.rise : COLORS.fall }}>{h.code.slice(0, 4)}</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+              <div style={{
+                width: 42, height: 42, borderRadius: 10, flexShrink: 0,
+                background: h.up ? COLORS.riseL : COLORS.fallL,
+                border: `1.5px solid ${h.up ? COLORS.riseB : COLORS.fallB}`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: h.up ? COLORS.rise : COLORS.fall }}>{h.code.slice(0, 4)}</span>
               </div>
-              <div className="min-w-0 flex-1">
-                <span className="text-xs font-semibold" style={{ color: COLORS.ink }}>{h.name}</span>
-                <div className="mt-0.5">
-                  <span className="text-xs" style={{ color: COLORS.dim }}>{h.quantity}주 · 평균 {h.avgPrice.toLocaleString()}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.ink }}>{h.name}</span>
+                <div style={{ marginTop: 3 }}>
+                  <span style={{ fontSize: 12, color: COLORS.dim }}>{h.quantity}주 · 평균 {h.avgPrice.toLocaleString()}</span>
                 </div>
                 {h.up && (
-                  <div className="mt-1.5">
-                    <div className="mb-0.5 flex justify-between">
-                      <span className="text-[10px]" style={{ color: COLORS.dim }}>트레일링 스탑</span>
-                      <span className="text-[10px] font-semibold" style={{ color: COLORS.rise }}>고점 -3% 감시</span>
+                  <div style={{ marginTop: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                      <span style={{ fontSize: 10, color: COLORS.dim }}>트레일링 스탑</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: COLORS.rise }}>고점 -3% 감시</span>
                     </div>
-                    <div className="h-[3px] rounded-sm" style={{ background: COLORS.line }}>
-                      <div className="h-full w-[70%] rounded-sm" style={{ background: COLORS.rise }} />
+                    <div style={{ height: 3, background: COLORS.line, borderRadius: 2 }}>
+                      <div style={{ height: "100%", width: "70%", background: COLORS.rise, borderRadius: 2 }} />
                     </div>
                   </div>
                 )}
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-3">
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
               <Sparkline data={h.history} color={h.up ? COLORS.rise : COLORS.fall} />
-              <div className="min-w-[72px] text-right">
-                <span className="text-xs font-bold tabular-nums" style={{ color: COLORS.ink }}>{h.cur.toLocaleString()}</span>
-                <div className="mt-0.5">
-                  <span className="text-xs font-bold tabular-nums" style={{ color: h.up ? COLORS.rise : COLORS.fall }}>
+              <div style={{ textAlign: "right", minWidth: 72 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink, fontVariantNumeric: "tabular-nums" }}>{h.cur.toLocaleString()}</span>
+                <div style={{ marginTop: 3 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: h.up ? COLORS.rise : COLORS.fall, fontVariantNumeric: "tabular-nums" }}>
                     {h.up ? "+" : ""}{h.pct.toFixed(2)}%
                   </span>
                 </div>
               </div>
             </div>
           </div>
-          <div className="h-px" style={{ background: COLORS.line }} />
+          <div style={{ height: 1, background: COLORS.line }} />
         </div>
       ))}
     </div>
