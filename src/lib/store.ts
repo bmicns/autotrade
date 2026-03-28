@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { DUMMY_HOLDINGS, DUMMY_STOCKS } from "./constants";
+import { DUMMY_HOLDINGS } from "./constants";
+import { fetchBalance, fetchPrices } from "./kis/client";
 
 type Tab = "home" | "signal" | "portfolio" | "stats" | "strategy" | "settings";
 
@@ -9,6 +10,19 @@ export interface Holding {
   market: string;
   quantity: number;
   avgPrice: number;
+}
+
+export interface StockPrice {
+  code: string;
+  name: string;
+  market: string;
+  price: number;
+  change: number;
+  changeRate: number;
+  volume: number;
+  high: number;
+  low: number;
+  open: number;
 }
 
 export interface Trade {
@@ -23,25 +37,47 @@ export interface Trade {
   executedAt: string;
 }
 
+export interface KISConfig {
+  appKey: string;
+  appSecret: string;
+  accountNo: string;
+  token?: string;
+  tokenExpiry?: string;
+}
+
 interface AppState {
-  // 네비게이션
   tab: Tab;
   setTab: (tab: Tab) => void;
 
-  // 자동매매 토글
   autoTrade: boolean;
   toggleAutoTrade: () => void;
 
-  // 보유 종목
+  // 보유 종목 (KIS 잔고 or 더미)
   holdings: Holding[];
   addHolding: (h: Holding) => void;
   removeHolding: (code: string) => void;
+
+  // 실시간 시세 (KIS에서 가져온 데이터)
+  prices: Map<string, StockPrice>;
+
+  // 계좌 정보
+  totalEval: number;
+  totalPnl: number;
+  cashBalance: number;
 
   // 매매 이력
   trades: Trade[];
   addTrade: (t: Trade) => void;
 
-  // 초기화
+  // KIS API 설정
+  kisConfig: KISConfig;
+  setKISConfig: (c: KISConfig) => void;
+
+  // KIS 데이터 로딩
+  kisLoading: boolean;
+  kisConnected: boolean;
+  fetchKISData: () => Promise<void>;
+
   hydrate: () => void;
 }
 
@@ -81,6 +117,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ holdings: next });
   },
 
+  prices: new Map(),
+  totalEval: 0,
+  totalPnl: 0,
+  cashBalance: 0,
+
   trades: [],
   addTrade: (t) => {
     const next = [t, ...get().trades];
@@ -88,9 +129,59 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ trades: next });
   },
 
+  kisConfig: { appKey: "", appSecret: "", accountNo: "" },
+  setKISConfig: (c) => {
+    saveToStorage("nx-kis", c);
+    set({ kisConfig: c });
+  },
+
+  kisLoading: false,
+  kisConnected: false,
+
+  fetchKISData: async () => {
+    const { kisConfig } = get();
+    if (!kisConfig.token || !kisConfig.accountNo) return;
+
+    set({ kisLoading: true });
+    try {
+      // 1. 잔고 조회
+      const balance = await fetchBalance(kisConfig);
+      if (balance && balance.holdings.length > 0) {
+        const holdings: Holding[] = balance.holdings.map((h) => ({
+          code: h.code,
+          name: h.name,
+          market: h.market,
+          quantity: h.quantity,
+          avgPrice: h.avgPrice,
+        }));
+        saveToStorage("nx-holdings", holdings);
+        set({
+          holdings,
+          totalEval: balance.totalEval,
+          totalPnl: balance.totalPnl,
+          cashBalance: balance.cashBalance,
+          kisConnected: true,
+        });
+
+        // 2. 보유 종목 시세 조회
+        const codes = holdings.map((h) => h.code);
+        const priceMap = await fetchPrices(kisConfig, codes);
+        set({ prices: priceMap });
+      } else {
+        // 잔고가 비어있어도 연결은 성공
+        set({ kisConnected: true, totalEval: balance?.cashBalance || 0, cashBalance: balance?.cashBalance || 0 });
+      }
+    } catch {
+      set({ kisConnected: false });
+    } finally {
+      set({ kisLoading: false });
+    }
+  },
+
   hydrate: () => {
     const holdings = loadFromStorage("nx-holdings", DUMMY_HOLDINGS);
     const trades = loadFromStorage<Trade[]>("nx-trades", []);
-    set({ holdings, trades });
+    const kisConfig = loadFromStorage<KISConfig>("nx-kis", { appKey: "", appSecret: "", accountNo: "" });
+    set({ holdings, trades, kisConfig });
   },
 }));

@@ -8,11 +8,14 @@ import { Donut } from "@/components/ui/donut";
 export function PortfolioTab() {
   const holdings = useAppStore((s) => s.holdings);
   const removeHolding = useAppStore((s) => s.removeHolding);
+  const prices = useAppStore((s) => s.prices);
   const enriched = holdings.map((h) => {
+    const real = prices.get(h.code);
     const stock = DUMMY_STOCKS.find((s) => s.code === h.code);
-    const cur = stock?.price ?? 0;
+    const cur = real?.price ?? stock?.price ?? 0;
+    const chgRate = real?.changeRate ?? stock?.change ?? 0;
     const pct = h.avgPrice > 0 ? ((cur - h.avgPrice) / h.avgPrice) * 100 : 0;
-    return { ...h, cur, pct, up: pct >= 0, history: stock?.history ?? [] };
+    return { ...h, cur, pct, chgRate, up: pct >= 0, history: stock?.history ?? [cur] };
   });
 
   const total = enriched.reduce((s, h) => s + h.cur * h.quantity, 0);
