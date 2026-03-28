@@ -14,14 +14,14 @@ export function TopBar() {
 
   return (
     <div
-      className="sticky top-0 z-50 flex items-center justify-between px-5 py-3 backdrop-blur-xl"
+      className="sticky top-0 z-50 flex items-center justify-between px-5 py-8 backdrop-blur-xl"
       style={{
         background: isHome ? "rgba(15,15,46,0.97)" : "rgba(255,255,255,0.96)",
         borderBottom: `1px solid ${isHome ? "rgba(255,255,255,0.08)" : COLORS.line}`,
       }}
     >
       {isHome ? (
-        <div className="text-[15px] font-black tracking-[0.15em] text-white">
+        <div className="text-[20px] font-black tracking-[0.15em] text-white">
           NEXIO<span style={{ color: COLORS.rise }}>.</span>
         </div>
       ) : (
@@ -30,7 +30,7 @@ export function TopBar() {
       {isHome && (
         <button
           onClick={toggleAutoTrade}
-          className="flex items-center gap-1.5 rounded-full px-3 py-[5px] transition-all"
+          className="flex items-center gap-2 rounded-full px-6 py-[6px] transition-all"
           style={{
             background: autoTrade ? COLORS.rise : "rgba(255,255,255,0.1)",
             border: `1px solid ${autoTrade ? COLORS.rise : "rgba(255,255,255,0.15)"}`,
