@@ -132,6 +132,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   setKISConfig: (c) => {
     saveToStorage("nx-kis", c);
     set({ kisConfig: c });
+    // Supabase에도 저장
+    fetch("/api/kis/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(c),
+    }).catch(() => {});
   },
 
   kisLoading: false,
@@ -177,10 +183,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  hydrate: () => {
+  hydrate: async () => {
     const holdings = loadFromStorage("nx-holdings", []);
     const trades = loadFromStorage<Trade[]>("nx-trades", []);
-    const kisConfig = loadFromStorage<KISConfig>("nx-kis", { appKey: "", appSecret: "", accountNo: "" });
+
+    // KIS 설정: Supabase 우선, 없으면 localStorage 폴백
+    let kisConfig = loadFromStorage<KISConfig>("nx-kis", { appKey: "", appSecret: "", accountNo: "" });
+    try {
+      const res = await fetch("/api/kis/config");
+      if (res.ok) {
+        const remote = await res.json();
+        if (remote.appKey) {
+          kisConfig = remote;
+          saveToStorage("nx-kis", kisConfig);
+        }
+      }
+    } catch { /* localStorage 폴백 */ }
+
     set({ holdings, trades, kisConfig });
   },
 }));
