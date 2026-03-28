@@ -1,5 +1,31 @@
+# dependencies
 node_modules/
+/.pnp
+.pnp.*
+
+# next.js
+/.next/
+/out/
+
+# env
 .env
+.env.local
+.env*.local
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+
+# vercel
+.vercel
+
+# supabase
+supabase/.temp/
+
+# legacy
 server/data/
 dist/
-.DS_Store
+_archive/
