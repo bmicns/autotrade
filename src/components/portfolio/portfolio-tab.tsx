@@ -1,34 +1,61 @@
 "use client";
 
-import { COLORS, DUMMY_STOCKS } from "@/lib/constants";
+import { COLORS } from "@/lib/constants";
 import { useAppStore } from "@/lib/store";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Donut } from "@/components/ui/donut";
 
 export function PortfolioTab() {
   const holdings = useAppStore((s) => s.holdings);
-  const removeHolding = useAppStore((s) => s.removeHolding);
   const prices = useAppStore((s) => s.prices);
+  const kisConnected = useAppStore((s) => s.kisConnected);
+  const cashBalance = useAppStore((s) => s.cashBalance);
+
   const enriched = holdings.map((h) => {
     const real = prices.get(h.code);
-    const stock = DUMMY_STOCKS.find((s) => s.code === h.code);
-    const cur = real?.price ?? stock?.price ?? 0;
-    const pct = h.avgPrice > 0 ? ((cur - h.avgPrice) / h.avgPrice) * 100 : 0;
-    return { ...h, cur, pct, up: pct >= 0, history: stock?.history ?? [cur] };
+    const cur = real?.price ?? 0;
+    const pct = h.avgPrice > 0 && cur > 0 ? ((cur - h.avgPrice) / h.avgPrice) * 100 : 0;
+    return { ...h, cur, pct, up: pct >= 0 };
   });
 
-  const total = enriched.reduce((s, h) => s + h.cur * h.quantity, 0);
-  const sectors = [{ name: "반도체", ratio: 65 }, { name: "IT/플랫폼", ratio: 20 }, { name: "기타", ratio: 15 }];
+  const totalStock = enriched.reduce((s, h) => s + h.cur * h.quantity, 0);
+  const total = totalStock + cashBalance;
+
+  if (holdings.length === 0) {
+    return (
+      <div style={{ padding: "60px 20px", textAlign: "center" }}>
+        <div style={{ marginBottom: 16 }}>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={COLORS.dim} strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21.21 15.89A10 10 0 118 2.83" /><path d="M22 12A10 10 0 0012 2v10z" />
+          </svg>
+        </div>
+        <span style={{ fontSize: 15, fontWeight: 600, color: COLORS.ink }}>포트폴리오 정보 없음</span>
+        <div style={{ marginTop: 8 }}>
+          <span style={{ fontSize: 13, color: COLORS.dim }}>
+            {kisConnected ? "보유 종목이 없습니다" : "KIS 연결 후 포트폴리오가 표시됩니다"}
+          </span>
+        </div>
+        {cashBalance > 0 && (
+          <div style={{ marginTop: 20, padding: "12px 16px", borderRadius: 10, background: COLORS.sub, border: `1px solid ${COLORS.line}`, display: "inline-block" }}>
+            <span style={{ fontSize: 12, color: COLORS.dim }}>예수금 </span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink }}>{Math.round(cashBalance).toLocaleString("ko-KR")}원</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const stockRatio = total > 0 ? Math.round((totalStock / total) * 100) : 0;
 
   return (
     <div>
       {/* 요약 */}
       <div style={{ padding: 20, display: "flex", gap: 20, alignItems: "center", borderBottom: `1px solid ${COLORS.line}` }}>
         <div style={{ position: "relative", flexShrink: 0 }}>
-          <Donut ratio={65} />
+          <Donut ratio={stockRatio} />
           <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center" }}>
-            <span style={{ fontSize: 12, fontWeight: 800, color: COLORS.rise }}>65%</span>
-            <div style={{ marginTop: 1 }}><span style={{ fontSize: 10, color: COLORS.dim }}>반도체</span></div>
+            <span style={{ fontSize: 12, fontWeight: 800, color: COLORS.rise }}>{stockRatio}%</span>
+            <div style={{ marginTop: 1 }}><span style={{ fontSize: 10, color: COLORS.dim }}>주식</span></div>
           </div>
         </div>
         <div>
@@ -38,12 +65,14 @@ export function PortfolioTab() {
             <span style={{ fontSize: 12, color: COLORS.mid }}> 원</span>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 20 }}>
-            {sectors.map((sec) => (
-              <div key={sec.name}>
-                <span style={{ fontSize: 12, color: COLORS.dim }}>{sec.name}</span>
-                <div><span style={{ fontSize: 12, fontWeight: 700, color: COLORS.rise }}>{sec.ratio}%</span></div>
-              </div>
-            ))}
+            <div>
+              <span style={{ fontSize: 12, color: COLORS.dim }}>주식</span>
+              <div><span style={{ fontSize: 12, fontWeight: 700, color: COLORS.rise }}>{stockRatio}%</span></div>
+            </div>
+            <div>
+              <span style={{ fontSize: 12, color: COLORS.dim }}>예수금</span>
+              <div><span style={{ fontSize: 12, fontWeight: 700, color: COLORS.fall }}>{100 - stockRatio}%</span></div>
+            </div>
           </div>
         </div>
       </div>
@@ -69,26 +98,17 @@ export function PortfolioTab() {
                 <div style={{ marginTop: 3 }}>
                   <span style={{ fontSize: 12, color: COLORS.dim }}>{h.quantity}주 · 평균 {h.avgPrice.toLocaleString()}</span>
                 </div>
-                {h.up && (
-                  <div style={{ marginTop: 6 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                      <span style={{ fontSize: 10, color: COLORS.dim }}>트레일링 스탑</span>
-                      <span style={{ fontSize: 10, fontWeight: 600, color: COLORS.rise }}>고점 -3% 감시</span>
-                    </div>
-                    <div style={{ height: 3, background: COLORS.line, borderRadius: 2 }}>
-                      <div style={{ height: "100%", width: "70%", background: COLORS.rise, borderRadius: 2 }} />
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-              <Sparkline data={h.history} color={h.up ? COLORS.rise : COLORS.fall} />
+              {h.cur > 0 && <Sparkline data={[h.cur * 0.98, h.cur * 0.99, h.cur]} color={h.up ? COLORS.rise : COLORS.fall} />}
               <div style={{ textAlign: "right", minWidth: 72 }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink, fontVariantNumeric: "tabular-nums" }}>{h.cur.toLocaleString()}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink, fontVariantNumeric: "tabular-nums" }}>
+                  {h.cur > 0 ? h.cur.toLocaleString() : "—"}
+                </span>
                 <div style={{ marginTop: 3 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: h.up ? COLORS.rise : COLORS.fall, fontVariantNumeric: "tabular-nums" }}>
-                    {h.up ? "+" : ""}{h.pct.toFixed(2)}%
+                    {h.cur > 0 ? `${h.up ? "+" : ""}${h.pct.toFixed(2)}%` : "—"}
                   </span>
                 </div>
               </div>

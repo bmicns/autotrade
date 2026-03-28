@@ -16,6 +16,7 @@ interface EngineConfig {
   trailingStop: number;  // 기본 -3
   maxPerTrade: number;   // 1회 한도 (원)
   maxDailyTrades: number; // 1일 최대 횟수
+  watchlist?: string[];   // 관심종목 코드 리스트
 }
 
 // KIS 헤더
@@ -196,8 +197,8 @@ async function runEngine(config: EngineConfig) {
     }
 
     // ═══ STEP 2: 관심종목 신호 분석 (매수) ═══
-    // 관심종목 리스트 (추후 설정에서 가져오도록 확장)
-    const watchlist = ["005930", "000660", "035720", "005380", "006400"]; // 삼성전자, SK하이닉스, 카카오, 현대차, 삼성SDI
+    // 관심종목: 요청 body에서 받거나 비어있으면 스킵
+    const watchlist: string[] = config.watchlist ?? [];
 
     for (const code of watchlist) {
       if (tradeCount >= maxDailyTrades) break;

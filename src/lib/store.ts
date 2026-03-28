@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { DUMMY_HOLDINGS } from "./constants";
 import { fetchBalance, fetchPrices } from "./kis/client";
 
 type Tab = "home" | "signal" | "portfolio" | "stats" | "strategy" | "settings";
@@ -105,7 +104,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   autoTrade: true,
   toggleAutoTrade: () => set((s) => ({ autoTrade: !s.autoTrade })),
 
-  holdings: DUMMY_HOLDINGS,
+  holdings: [],
   addHolding: (h) => {
     const next = [...get().holdings, h];
     saveToStorage("nx-holdings", next);
@@ -179,7 +178,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   hydrate: () => {
-    const holdings = loadFromStorage("nx-holdings", DUMMY_HOLDINGS);
+    const holdings = loadFromStorage("nx-holdings", []);
     const trades = loadFromStorage<Trade[]>("nx-trades", []);
     const kisConfig = loadFromStorage<KISConfig>("nx-kis", { appKey: "", appSecret: "", accountNo: "" });
     set({ holdings, trades, kisConfig });

@@ -1,93 +1,68 @@
 "use client";
 
-import { useState } from "react";
 import { COLORS } from "@/lib/constants";
-import { Badge } from "@/components/ui/badge";
-import { Icon } from "@/components/ui/icons";
-
-const PARAMS = [
-  { name: "RSI 매수 기준", cur: "30", sug: "28", changed: true },
-  { name: "지표 일치 기준", cur: "4개", sug: "4개", changed: false },
-  { name: "트레일링 스탑", cur: "-3%", sug: "-3%", changed: false },
-  { name: "거래량 기준", cur: "200%", sug: "180%", changed: true },
-  { name: "1차 익절", cur: "+5%", sug: "+5%", changed: false },
-];
-
-const VERSIONS = [
-  { v: "v1.2", d: "2026-03-01", n: "거래량 기준 완화" },
-  { v: "v1.1", d: "2026-02-01", n: "트레일링 스탑 조정" },
-  { v: "v1.0", d: "2026-01-01", n: "초기 파라미터" },
-];
+import { useAppStore } from "@/lib/store";
 
 export function StrategyTab() {
-  const [approved, setApproved] = useState(false);
+  const kisConnected = useAppStore((s) => s.kisConnected);
+
+  // 엔진에서 사용하는 실제 파라미터 (설정 탭 값 기반)
+  const params = [
+    { name: "RSI 매수 기준", value: "< 30" },
+    { name: "RSI 매도 기준", value: "> 70" },
+    { name: "지표 일치 기준 (강한)", value: "4개 이상 / 5개" },
+    { name: "지표 일치 기준 (약한)", value: "2~3개 / 5개" },
+    { name: "손절 라인", value: "-5%" },
+    { name: "1차 익절", value: "+5%" },
+    { name: "트레일링 스탑", value: "고점 -3%" },
+    { name: "1회 매매 한도", value: "100만원" },
+    { name: "1일 최대 횟수", value: "5회" },
+  ];
 
   return (
     <div>
       {/* 현재 전략 파라미터 */}
       <div style={{ padding: "20px 20px 10px" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>현재 전략 파라미터</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>자동매매 전략</span>
       </div>
       <div style={{ padding: "0 20px" }}>
-        {PARAMS.map((p, i) => (
+        {params.map((p, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 0", borderTop: `1px solid ${COLORS.line}` }}>
             <span style={{ fontSize: 14, fontWeight: 500, color: COLORS.ink }}>{p.name}</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {p.changed && <span style={{ fontSize: 12, color: COLORS.dim, textDecoration: "line-through" }}>{p.cur}</span>}
-              <span style={{ fontSize: 14, fontWeight: 700, color: p.changed ? COLORS.rise : COLORS.ink }}>{p.sug}</span>
-              {p.changed && <Badge label="변경 제안" tone="rise" />}
-            </div>
+            <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink }}>{p.value}</span>
           </div>
         ))}
       </div>
 
-      {/* Claude 전략 개선안 */}
-      <div style={{ margin: "16px 16px 0", padding: 16, borderRadius: 12, background: `${COLORS.fall}08`, border: `1px solid ${COLORS.fall}30` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.fall }}>3월 Claude 전략 개선안</span>
-          <Badge label="승인 대기" tone="gold" />
-        </div>
-        <span style={{ fontSize: 14, color: COLORS.mid, lineHeight: 1.65 }}>
-          RSI 28~30 구간 반등 성공률 74% 집계. 기준값 30→28 조정 시 진입 타이밍 개선. 거래량 기준 200%→180% 완화 시 놓치는 신호 약 12% 감소.
-        </span>
-        <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
-          {!approved ? (
-            <>
-              <button style={{
-                flex: 1, padding: "12px 0", borderRadius: 8,
-                border: `1px solid ${COLORS.lineD}`, background: "transparent",
-                fontSize: 11, fontWeight: 600, color: COLORS.mid, cursor: "pointer", fontFamily: "inherit",
-              }}>거절</button>
-              <button onClick={() => setApproved(true)} style={{
-                flex: 2, padding: "12px 0", borderRadius: 8,
-                border: "none", background: COLORS.ink, color: "#fff",
-                fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-              }}>승인 · 파라미터 적용</button>
-            </>
-          ) : (
-            <div style={{ flex: 1, padding: 12, borderRadius: 8, textAlign: "center", background: COLORS.riseL, border: `1px solid ${COLORS.riseB}` }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.rise }}>✓ 파라미터 업데이트 완료</span>
-            </div>
-          )}
-        </div>
-      </div>
+      <div style={{ height: 1, background: COLORS.line, marginTop: 8 }} />
 
-      {/* 버전 이력 */}
+      {/* 분석 지표 */}
       <div style={{ padding: "20px 20px 10px" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>버전 이력</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>분석 지표 (5종)</span>
       </div>
       <div style={{ padding: "0 20px 16px" }}>
-        {VERSIONS.map((item, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderTop: `1px solid ${COLORS.line}` }}>
-            <div>
-              <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink }}>{item.v}</span>
-              <div style={{ marginTop: 3 }}>
-                <span style={{ fontSize: 12, color: COLORS.dim }}>{item.d} · {item.n}</span>
-              </div>
-            </div>
-            <Icon name="cr" size={16} color={COLORS.dim} strokeWidth={1.4} />
+        {["RSI — 과매수·과매도", "MACD — 추세 전환", "이동평균 — 5일/20일 크로스", "볼린저밴드 — 변동성", "거래량 — 20일 평균 대비"].map((ind, i) => (
+          <div key={i} style={{ padding: "10px 0", borderTop: i > 0 ? `1px solid ${COLORS.line}` : "none" }}>
+            <span style={{ fontSize: 13, color: COLORS.mid }}>{ind}</span>
           </div>
         ))}
+      </div>
+
+      <div style={{ height: 1, background: COLORS.line }} />
+
+      {/* 엔진 상태 */}
+      <div style={{ padding: "20px 20px 10px" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>엔진 상태</span>
+      </div>
+      <div style={{ padding: "0 20px 20px" }}>
+        <div style={{ padding: "14px 16px", borderRadius: 10, background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: kisConnected ? "#22C55E" : COLORS.dim }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.ink }}>
+              {kisConnected ? "Vercel Cron 활성 — 평일 09시 자동 실행" : "KIS 미연결 — 엔진 비활성"}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
