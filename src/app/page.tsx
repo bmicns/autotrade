@@ -39,7 +39,7 @@ export default function App() {
   return (
     <div className="min-h-screen" style={{ background: COLORS.bg, color: COLORS.ink }}>
       {!isMobile && <SideBar />}
-      <div style={{ marginLeft: isMobile ? 0 : 200, maxWidth: isMobile ? "100%" : 560 }}>
+      <div style={{ marginLeft: isMobile ? 0 : 182 }}>
         <TopBar />
         <div style={{ paddingBottom: isMobile ? 90 : 40 }}>
           {page()}
