@@ -1,13 +1,29 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { COLORS } from "@/lib/constants";
 import { useAppStore } from "@/lib/store";
 import { Badge } from "@/components/ui/badge";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Icon } from "@/components/ui/icons";
 
+interface NewsItem {
+  title: string;
+  source: string;
+  time: string;
+  url: string;
+  sentiment?: "positive" | "negative" | "neutral";
+  score?: number;
+  summary?: string;
+}
+
 export function HomeTab() {
+  const [newsTab, setNewsTab] = useState<"naver" | "dart">("naver");
+  const [naverNews, setNaverNews] = useState<NewsItem[]>([]);
+  const [disclosures, setDisclosures] = useState<NewsItem[]>([]);
+  const [aiSentiment, setAiSentiment] = useState<NewsItem[]>([]);
+  const [newsLoading, setNewsLoading] = useState(true);
+
   const holdings = useAppStore((s) => s.holdings);
   const prices = useAppStore((s) => s.prices);
   const kisConnected = useAppStore((s) => s.kisConnected);
@@ -23,6 +39,18 @@ export function HomeTab() {
       fetchKISData();
     }
   }, [kisConfig.token, kisConfig.accountNo, kisConnected, kisLoading, fetchKISData]);
+
+  useEffect(() => {
+    fetch("/api/news")
+      .then((r) => r.json())
+      .then((d) => {
+        setNaverNews(d.naverNews || []);
+        setDisclosures(d.disclosures || []);
+        setAiSentiment(d.aiSentiment || []);
+      })
+      .catch(() => {})
+      .finally(() => setNewsLoading(false));
+  }, []);
 
   function getPrice(code: string) {
     const real = prices.get(code);
@@ -47,7 +75,7 @@ export function HomeTab() {
   return (
     <div>
       {/* ── 히어로 ── */}
-      <div style={{ padding: "24px 20px 20px", background: COLORS.hero, textAlign: "right" }}>
+      <div style={{ padding: "54px 20px 50px", background: COLORS.hero, textAlign: "right" }}>
         {kisLoading && (
           <div style={{ textAlign: "left", marginBottom: 8 }}>
             <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>KIS 데이터 로딩 중...</span>
@@ -152,12 +180,85 @@ export function HomeTab() {
         );
       })}
 
-      {/* ── 시장 뉴스 ── */}
-      <div style={{ padding: "20px 20px 10px" }}>
+      {/* ── 뉴스 탭 (네이버 뉴스 / 공시정보) ── */}
+      <div style={{ padding: "20px 20px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>시장 뉴스</span>
+        <div style={{ display: "flex", gap: 4, background: COLORS.sub, borderRadius: 8, padding: 3 }}>
+          {(["naver", "dart"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setNewsTab(t)}
+              style={{
+                padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer",
+                fontSize: 11, fontWeight: newsTab === t ? 700 : 500, fontFamily: "inherit",
+                background: newsTab === t ? "#fff" : "transparent",
+                color: newsTab === t ? COLORS.ink : COLORS.dim,
+                boxShadow: newsTab === t ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              }}
+            >
+              {t === "naver" ? "네이버 뉴스" : "공시정보"}
+            </button>
+          ))}
+        </div>
       </div>
-      <div style={{ padding: "20px 20px 40px", textAlign: "center" }}>
-        <span style={{ fontSize: 14, color: COLORS.dim }}>정보 없음</span>
+
+      {newsLoading ? (
+        <div style={{ padding: "30px 20px", textAlign: "center" }}>
+          <span style={{ fontSize: 13, color: COLORS.dim }}>뉴스 로딩 중...</span>
+        </div>
+      ) : (
+        <div>
+          {(newsTab === "naver" ? naverNews : disclosures).map((n, i) => (
+            <div key={i}>
+              <div style={{ padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: COLORS.ink, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" }}>
+                    {n.title}
+                  </span>
+                  <div style={{ marginTop: 4, display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: COLORS.dim }}>{n.source}</span>
+                    <span style={{ fontSize: 11, color: COLORS.dim }}>{n.time}</span>
+                  </div>
+                </div>
+              </div>
+              <div style={{ height: 1, background: COLORS.line }} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── AI 감성 분석 ── */}
+      <div style={{ padding: "24px 20px 10px" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>AI 감성 분석</span>
+      </div>
+      <div style={{ padding: "0 20px 30px" }}>
+        <div style={{ borderRadius: 12, border: `1px solid ${COLORS.line}`, overflow: "hidden" }}>
+          {/* 테이블 헤더 */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 100px", background: COLORS.sub, padding: "10px 16px" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.dim, textTransform: "uppercase", letterSpacing: "0.05em" }}>뉴스</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.dim, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center" }}>감성</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.dim, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>판단</span>
+          </div>
+          {/* 테이블 바디 */}
+          {aiSentiment.map((n, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 80px 100px", padding: "12px 16px", borderTop: `1px solid ${COLORS.line}`, alignItems: "center" }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: COLORS.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {n.title}
+              </span>
+              <div style={{ textAlign: "center" }}>
+                <span style={{
+                  display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                  background: n.sentiment === "positive" ? COLORS.riseL : n.sentiment === "negative" ? COLORS.fallL : COLORS.sub,
+                  color: n.sentiment === "positive" ? COLORS.rise : n.sentiment === "negative" ? COLORS.fall : COLORS.dim,
+                  border: `1px solid ${n.sentiment === "positive" ? COLORS.riseB : n.sentiment === "negative" ? COLORS.fallB : COLORS.line}`,
+                }}>
+                  {n.sentiment === "positive" ? "긍정" : n.sentiment === "negative" ? "부정" : "중립"}
+                </span>
+              </div>
+              <span style={{ fontSize: 11, color: COLORS.mid, textAlign: "right" }}>{n.summary}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
