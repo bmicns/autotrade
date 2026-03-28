@@ -25,6 +25,77 @@ interface EngineConfig {
   watchlist?: string[];   // 관심종목 코드 리스트
 }
 
+// 코스피 급등주 탐색 (등락률 상위 + 거래량 급증)
+async function scanSurgeStocks(config: EngineConfig): Promise<string[]> {
+  const codes = new Set<string>();
+
+  // 1. 등락률 상위 30종목 (코스피)
+  try {
+    const params = new URLSearchParams({
+      fid_cond_mrkt_div_code: "J",     // 코스피
+      fid_cond_scr_div_code: "20170",  // 등락률
+      fid_input_iscd: "0001",          // 코스피 전체
+      fid_rank_sort_cls_code: "0",     // 상승률 순
+      fid_input_cnt_1: "0",            // 가격 하한 없음
+      fid_input_cnt_2: "",             // 가격 상한 없음
+      fid_div_cls_code: "0",
+      fid_trgt_cls_code: "0",
+      fid_trgt_exls_cls_code: "0",
+      fid_input_price_1: "",
+      fid_input_price_2: "",
+      fid_vol_cnt: "",
+      fid_input_date_1: "",
+    });
+    const res = await fetch(
+      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`,
+      { headers: headers(config, "FHPST01700000") }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const items = data.output || [];
+      for (const item of items.slice(0, 30)) {
+        const code = item.stck_shrn_iscd || item.mksc_shrn_iscd;
+        const rate = Number(item.prdy_ctrt) || 0;
+        // 3% 이상 상승 + 거래대금 10억 이상
+        if (code && rate >= 3) codes.add(code);
+      }
+    }
+  } catch { /* 등락률 조회 실패 무시 */ }
+
+  // 2. 거래량 급증 상위 20종목 (코스피)
+  try {
+    const params = new URLSearchParams({
+      fid_cond_mrkt_div_code: "J",
+      fid_cond_scr_div_code: "20171",  // 거래량
+      fid_input_iscd: "0001",
+      fid_rank_sort_cls_code: "0",
+      fid_input_cnt_1: "0",
+      fid_input_cnt_2: "",
+      fid_div_cls_code: "0",
+      fid_trgt_cls_code: "0",
+      fid_trgt_exls_cls_code: "0",
+      fid_input_price_1: "",
+      fid_input_price_2: "",
+      fid_vol_cnt: "",
+      fid_input_date_1: "",
+    });
+    const res = await fetch(
+      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`,
+      { headers: headers(config, "FHPST01700000") }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const items = data.output || [];
+      for (const item of items.slice(0, 20)) {
+        const code = item.stck_shrn_iscd || item.mksc_shrn_iscd;
+        if (code) codes.add(code);
+      }
+    }
+  } catch { /* 거래량 조회 실패 무시 */ }
+
+  return Array.from(codes);
+}
+
 // KIS 헤더
 function headers(config: EngineConfig, trId: string) {
   return {
@@ -254,9 +325,54 @@ async function runEngine(config: EngineConfig) {
       }
     }
 
+    // ═══ STEP 3: 코스피 급등주 스캔 (등락률+거래량 상위) ═══
+    if (tradeCount < maxDailyTrades) {
+      const surgeStocks = await scanSurgeStocks(config);
+      // watchlist와 보유종목 제외
+      const holdingCodes = new Set(holdings.map((h: Record<string, string>) => h.pdno));
+      const watchlistSet = new Set(watchlist);
+      const candidates = surgeStocks.filter((c) => !holdingCodes.has(c) && !watchlistSet.has(c));
+
+      for (const code of candidates) {
+        if (tradeCount >= maxDailyTrades) break;
+
+        const candles = await getDailyCandles(config, code);
+        if (candles.length < 26) continue;
+
+        const signal = analyzeSignal(candles);
+        await new Promise((r) => setTimeout(r, 200));
+
+        if (signal.strength === "strong" && signal.side === "buy") {
+          const priceData = await getPrice(config, code);
+          const price = Number(priceData?.stck_prpr) || 0;
+          if (price <= 0) continue;
+
+          const qty = Math.floor(maxPerTrade / price);
+          if (qty <= 0) continue;
+
+          const result = await buyOrder(config, code, qty);
+          actions.push({
+            type: "surge_buy",
+            code,
+            detail: `급등주 강한 신호 ${signal.matchCount}/5 → 자동 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg1 || "주문완료"})`,
+          });
+          tradeCount++;
+          await new Promise((r) => setTimeout(r, 200));
+
+        } else if (signal.strength === "weak" && signal.side === "buy") {
+          actions.push({
+            type: "surge_pending",
+            code,
+            detail: `급등주 약한 신호 ${signal.matchCount}/5 → 승인 대기. ${signal.comment}`,
+          });
+        }
+      }
+    }
+
     return NextResponse.json({
       timestamp: new Date().toISOString(),
       tradeCount,
+      surgeScanned: true,
       actions,
     });
   } catch (e: unknown) {
