@@ -14,10 +14,12 @@ export function TopBar() {
 
   return (
     <div
-      className="sticky top-0 z-50 flex items-center justify-between px-5 py-8 backdrop-blur-xl"
+      className="sticky top-0 z-50 flex items-center justify-between py-8 backdrop-blur-xl"
       style={{
         background: isHome ? "rgba(15,15,46,0.97)" : "rgba(255,255,255,0.96)",
         borderBottom: `1px solid ${isHome ? "rgba(255,255,255,0.08)" : COLORS.line}`,
+        paddingLeft: 20,
+        paddingRight: 20,
       }}
     >
       {isHome ? (
