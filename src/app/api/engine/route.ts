@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
 import { analyzeSignal, checkRisk, type DailyCandle } from "@/lib/kis/indicators";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+);
 
 // Vercel Cron에서 1분마다 호출
 // 1. 보유종목 시세 감시 → 손절/익절/트레일링 체크
@@ -139,10 +145,18 @@ export async function GET(req: NextRequest) {
   if (!tokenRes.ok) return NextResponse.json({ error: "토큰 발급 실패" }, { status: 500 });
   const tokenData = await tokenRes.json();
 
+  // Supabase에서 watchlist 조회
+  const { data: watchlistData } = await supabase
+    .from("watchlist")
+    .select("code")
+    .eq("active", true);
+  const watchlist = (watchlistData || []).map((w: { code: string }) => w.code);
+
   const config: EngineConfig = {
     appKey, appSecret, accountNo, token: tokenData.access_token,
     stopLoss: -5, takeProfit: 5, trailingStop: -3,
     maxPerTrade: 1000000, maxDailyTrades: 5,
+    watchlist,
   };
 
   return runEngine(config);
