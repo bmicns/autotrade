@@ -20,8 +20,8 @@ export function TopBar() {
         borderBottom: `1px solid ${isHome ? "rgba(255,255,255,0.08)" : COLORS.line}`,
         paddingLeft: 20,
         paddingRight: 20,
-        paddingTop: 20,
-        paddingBottom: 20,
+        paddingTop: 15,
+        paddingBottom: 15,
       }}
     >
       {isHome ? (
