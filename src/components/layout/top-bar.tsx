@@ -14,7 +14,7 @@ export function TopBar() {
 
   return (
     <div
-      className="sticky top-0 z-50 flex items-center justify-between py-12 backdrop-blur-xl"
+      className="sticky top-0 z-50 flex items-center justify-between py-[72px] backdrop-blur-xl"
       style={{
         background: isHome ? "rgba(15,15,46,0.97)" : "rgba(255,255,255,0.96)",
         borderBottom: `1px solid ${isHome ? "rgba(255,255,255,0.08)" : COLORS.line}`,
@@ -34,7 +34,7 @@ export function TopBar() {
           onClick={toggleAutoTrade}
           className="flex items-center gap-2 rounded-full transition-all"
           style={{
-            padding: "8px 30px",
+            padding: "5px 30px",
             background: autoTrade ? COLORS.rise : "rgba(255,255,255,0.1)",
             border: `1px solid ${autoTrade ? COLORS.rise : "rgba(255,255,255,0.15)"}`,
           }}
