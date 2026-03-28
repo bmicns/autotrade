@@ -146,7 +146,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       // 1. 잔고 조회
       const balance = await fetchBalance(kisConfig);
-      if (balance && balance.holdings.length > 0) {
+      if (balance) {
+        // KIS 연결 성공 → 더미 제거, KIS 잔고만 표시
         const holdings: Holding[] = balance.holdings.map((h) => ({
           code: h.code,
           name: h.name,
@@ -157,19 +158,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         saveToStorage("nx-holdings", holdings);
         set({
           holdings,
-          totalEval: balance.totalEval,
+          totalEval: balance.totalEval || balance.cashBalance,
           totalPnl: balance.totalPnl,
           cashBalance: balance.cashBalance,
           kisConnected: true,
         });
 
-        // 2. 보유 종목 시세 조회
-        const codes = holdings.map((h) => h.code);
-        const priceMap = await fetchPrices(kisConfig, codes);
-        set({ prices: priceMap });
-      } else {
-        // 잔고가 비어있어도 연결은 성공
-        set({ kisConnected: true, totalEval: balance?.cashBalance || 0, cashBalance: balance?.cashBalance || 0 });
+        // 보유 종목이 있으면 시세도 조회
+        if (holdings.length > 0) {
+          const codes = holdings.map((h) => h.code);
+          const priceMap = await fetchPrices(kisConfig, codes);
+          set({ prices: priceMap });
+        }
       }
     } catch {
       set({ kisConnected: false });
