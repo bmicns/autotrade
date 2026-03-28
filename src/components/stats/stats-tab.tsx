@@ -43,7 +43,7 @@ export function StatsTab() {
           { l: "매수", v: `${buys.length}회`, c: COLORS.rise },
           { l: "매도", v: `${sells.length}회`, c: COLORS.fall },
         ].map((item, i) => (
-          <div key={i} style={{ background: COLORS.sub, borderRadius: 10, padding: 14, border: `1px solid ${COLORS.line}` }}>
+          <div key={i} style={{ background: COLORS.sub, borderRadius: 12, padding: 14, border: `1px solid ${COLORS.line}` }}>
             <span style={{ fontSize: 12, color: COLORS.dim }}>{item.l}</span>
             <div style={{ marginTop: 8 }}>
               <span style={{ fontSize: 14, fontWeight: 800, color: item.c, fontVariantNumeric: "tabular-nums" }}>{item.v}</span>

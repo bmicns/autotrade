@@ -36,7 +36,7 @@ export function PortfolioTab() {
           </span>
         </div>
         {cashBalance > 0 && (
-          <div style={{ marginTop: 20, padding: "12px 16px", borderRadius: 10, background: COLORS.sub, border: `1px solid ${COLORS.line}`, display: "inline-block" }}>
+          <div style={{ marginTop: 20, padding: "12px 16px", borderRadius: 12, background: COLORS.sub, border: `1px solid ${COLORS.line}`, display: "inline-block" }}>
             <span style={{ fontSize: 12, color: COLORS.dim }}>예수금 </span>
             <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink }}>{Math.round(cashBalance).toLocaleString("ko-KR")}원</span>
           </div>
@@ -86,7 +86,7 @@ export function PortfolioTab() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
               <div style={{
-                width: 42, height: 42, borderRadius: 10, flexShrink: 0,
+                width: 42, height: 42, borderRadius: 12, flexShrink: 0,
                 background: h.up ? COLORS.riseL : COLORS.fallL,
                 border: `1.5px solid ${h.up ? COLORS.riseB : COLORS.fallB}`,
                 display: "flex", alignItems: "center", justifyContent: "center",

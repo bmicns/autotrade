@@ -16,7 +16,7 @@ export function Badge({ label, tone = "dim" }: { label: string; tone?: Tone }) {
   const t = toneMap[tone];
   return (
     <span
-      className="inline-flex items-center rounded-[3px] px-[7px] py-[2px] text-[9px] font-semibold tracking-tight"
+      className="inline-flex items-center rounded-[6px] px-[8px] py-[2px] text-[10px] font-semibold tracking-tight"
       style={{ background: t.bg, border: `1px solid ${t.border}`, color: t.color }}
     >
       {label}

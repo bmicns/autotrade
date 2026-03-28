@@ -81,7 +81,7 @@ export function HomeTab() {
 
         {/* 상태 배너 */}
         <div style={{
-          marginTop: 14, padding: "9px 14px", borderRadius: 8,
+          marginTop: 14, padding: "9px 14px", borderRadius: 12,
           background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)",
           display: "flex", alignItems: "center", justifyContent: "space-between",
         }}>
@@ -107,7 +107,7 @@ export function HomeTab() {
 
       {holdings.length === 0 ? (
         <div style={{ padding: "40px 20px", textAlign: "center" }}>
-          <span style={{ fontSize: 13, color: COLORS.dim }}>
+          <span style={{ fontSize: 14, color: COLORS.dim }}>
             {kisConnected ? "보유 종목이 없습니다" : "KIS 연결 후 보유 종목이 표시됩니다"}
           </span>
         </div>
@@ -119,7 +119,7 @@ export function HomeTab() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <div style={{
-                  width: 40, height: 40, borderRadius: 8, flexShrink: 0,
+                  width: 40, height: 40, borderRadius: 12, flexShrink: 0,
                   background: up ? COLORS.riseL : COLORS.fallL,
                   border: `1.5px solid ${up ? COLORS.riseB : COLORS.fallB}`,
                   display: "flex", alignItems: "center", justifyContent: "center",
@@ -157,7 +157,7 @@ export function HomeTab() {
         <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" }}>시장 뉴스</span>
       </div>
       <div style={{ padding: "20px 20px 40px", textAlign: "center" }}>
-        <span style={{ fontSize: 13, color: COLORS.dim }}>정보 없음</span>
+        <span style={{ fontSize: 14, color: COLORS.dim }}>정보 없음</span>
       </div>
     </div>
   );

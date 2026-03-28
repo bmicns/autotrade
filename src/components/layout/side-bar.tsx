@@ -34,7 +34,7 @@ export function SideBar() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className="relative mb-[2px] flex w-full items-center gap-2.5 rounded-lg border-none px-3 py-2.5"
+              className="relative mb-[2px] flex w-full items-center gap-2.5 rounded-xl border-none px-3 py-2.5"
               style={{ background: on ? `${COLORS.rise}12` : "transparent" }}
             >
               <Icon name={t.icon} size={18} color={on ? COLORS.rise : COLORS.mid} strokeWidth={on ? 2 : 1.5} />

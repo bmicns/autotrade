@@ -12,9 +12,9 @@ const TRADE_GROUPS = [
 ];
 
 const inputStyle: React.CSSProperties = {
-  width: "100%", padding: "10px 12px", borderRadius: 8,
+  width: "100%", padding: "10px 14px", borderRadius: 10,
   border: `1.5px solid ${COLORS.line}`, background: COLORS.sub,
-  color: COLORS.ink, fontSize: 13, fontFamily: "inherit", outline: "none", letterSpacing: "-0.5px",
+  color: COLORS.ink, fontSize: 14, fontFamily: "inherit", outline: "none", letterSpacing: "-0.3px",
 };
 
 export function SettingsTab() {
@@ -73,26 +73,26 @@ export function SettingsTab() {
 
       <div style={{ padding: "0 20px 16px", display: "flex", flexDirection: "column" as const, gap: 12 }}>
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>App Key</label>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>App Key</label>
           <input type="text" value={appKey} onChange={(e) => setAppKey(e.target.value)} placeholder="KIS Developers에서 발급받은 앱키" style={inputStyle} />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>App Secret</label>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>App Secret</label>
           <input type="password" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder="KIS Developers에서 발급받은 시크릿" style={inputStyle} />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>계좌번호</label>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>계좌번호</label>
           <input type="text" value={accountNo} onChange={(e) => setAccountNo(e.target.value)} placeholder="모의투자 계좌번호 (예: 5012345601)" style={inputStyle} />
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={handleSave} style={{
-            flex: 1, padding: "10px 0", borderRadius: 8, border: "none",
+            flex: 1, padding: "10px 0", borderRadius: 10, border: "none",
             background: saved ? "#22C55E" : COLORS.ink, color: "#fff",
             fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
           }}>{saved ? "✓ 저장됨" : "저장"}</button>
           <button onClick={handleTest} disabled={testing} style={{
-            flex: 1, padding: "10px 0", borderRadius: 8,
+            flex: 1, padding: "10px 0", borderRadius: 12,
             background: "transparent", color: COLORS.rise,
             border: `1.5px solid ${COLORS.rise}`,
             fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
@@ -102,14 +102,14 @@ export function SettingsTab() {
 
         {testResult && (
           <div style={{
-            borderRadius: 8, padding: "10px 12px", fontSize: 12, fontWeight: 500,
+            borderRadius: 12, padding: "10px 12px", fontSize: 12, fontWeight: 500,
             background: testResult.includes("성공") ? "#F0FDF4" : "#FEF2F2",
             color: testResult.includes("성공") ? "#16A34A" : "#DC2626",
             border: `1px solid ${testResult.includes("성공") ? "#BBF7D0" : "#FECACA"}`,
           }}>{testResult}</div>
         )}
 
-        <div style={{ borderRadius: 8, padding: 12, background: `${COLORS.fall}08`, border: `1px solid ${COLORS.fall}15` }}>
+        <div style={{ borderRadius: 12, padding: 12, background: `${COLORS.fall}08`, border: `1px solid ${COLORS.fall}15` }}>
           <span style={{ fontSize: 11, lineHeight: 1.6, color: COLORS.mid }}>
             KIS Developers (apiportal.koreainvestment.com)에서 모의투자용 앱키를 발급받으세요. 키는 브라우저 로컬에만 저장됩니다.
           </span>
@@ -128,7 +128,7 @@ export function SettingsTab() {
             <div key={ri}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 8, background: COLORS.sub, border: `1px solid ${COLORS.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 12, background: COLORS.sub, border: `1px solid ${COLORS.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <Icon name={r.i} size={16} color={COLORS.mid} strokeWidth={1.5} />
                   </div>
                   <span style={{ fontSize: 14, fontWeight: 500, color: COLORS.ink }}>{r.l}</span>

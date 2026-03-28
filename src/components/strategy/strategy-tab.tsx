@@ -55,7 +55,7 @@ export function StrategyTab() {
         <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "-0.5px", textTransform: "uppercase" as const }}>엔진 상태</span>
       </div>
       <div style={{ padding: "0 20px 20px" }}>
-        <div style={{ padding: "14px 16px", borderRadius: 10, background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>
+        <div style={{ padding: "14px 16px", borderRadius: 12, background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: kisConnected ? "#22C55E" : COLORS.dim }} />
             <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.ink }}>

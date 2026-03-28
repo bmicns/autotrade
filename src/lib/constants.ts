@@ -1,13 +1,13 @@
-// NEXIO 디자인 시스템 — 국내주식 전용
+// NEXIO 디자인 시스템 — CLIO 구조 통일
 export const COLORS = {
   bg: "#FFFFFF",
-  sub: "#F4F4F2",
-  card: "#F9F9F7",
-  line: "#E6E6E2",
-  lineD: "#CACAC6",
+  sub: "#F5F5F7",
+  card: "#F7F8FA",
+  line: "#E2E5EA",
+  lineD: "#D1D5DB",
   ink: "#0A0A0A",
   mid: "#484848",
-  dim: "#909090",
+  dim: "#7C8494",
   rise: "#E22929",
   fall: "#1554F0",
   riseL: "#FFF0F0",
