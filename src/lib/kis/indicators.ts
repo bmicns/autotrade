@@ -1,5 +1,6 @@
-// NEXIO 기술지표 분석 엔진
-// 기획서 기준 5개 지표: RSI, MACD, 이동평균, 볼린저밴드, 거래량
+// NEXIO 기술지표 분석 엔진 v2
+// 6개 지표: RSI, MACD, 이동평균, 볼린저밴드, 거래량, ADX
+// 가중치 점수제 + 시장 레짐 감지
 
 export interface DailyCandle {
   date: string;
@@ -14,7 +15,9 @@ export interface IndicatorResult {
   name: string;
   value: string;
   desc: string;
-  hit: boolean; // 매수 신호 충족 여부
+  hit: boolean;
+  score: number;      // 0~100 가중 점수
+  weight: number;     // 적용된 가중치
 }
 
 export interface SignalRaw {
@@ -27,18 +30,21 @@ export interface SignalRaw {
   bbPosition: string;
   volumeRatio: number;
   atr: number;
+  adx: number;
+  regime: "trending" | "ranging";
 }
 
 export interface SignalResult {
   indicators: IndicatorResult[];
-  matchCount: number;      // 충족 지표 수
-  strength: "strong" | "weak" | "none";  // 강한(4+) / 약한(2-3) / 없음(0-1)
+  totalScore: number;        // 가중 합산 점수 (0~100)
+  matchCount: number;
+  strength: "strong" | "weak" | "none";
   side: "buy" | "sell" | "hold";
   comment: string;
-  raw: SignalRaw;          // 지표 원시값 (성과 분석용)
+  raw: SignalRaw;
 }
 
-// ─── RSI (Relative Strength Index) ──────────────────
+// ─── RSI ─────────────────────────────────────────
 function calcRSI(closes: number[], period = 14): number {
   if (closes.length < period + 1) return 50;
   let gains = 0, losses = 0;
@@ -50,11 +56,10 @@ function calcRSI(closes: number[], period = 14): number {
   const avgGain = gains / period;
   const avgLoss = losses / period;
   if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - 100 / (1 + rs);
+  return 100 - 100 / (1 + avgGain / avgLoss);
 }
 
-// ─── MACD ───────────────────────────────────────────
+// ─── MACD ────────────────────────────────────────
 function ema(data: number[], period: number): number[] {
   const k = 2 / (period + 1);
   const result = [data[0]];
@@ -82,7 +87,7 @@ function calcMACD(closes: number[]) {
   return { macd, signal, histogram: macd - signal, crossover };
 }
 
-// ─── 이동평균 (MA Crossover) ────────────────────────
+// ─── SMA ─────────────────────────────────────────
 function sma(data: number[], period: number): number {
   if (data.length < period) return data[data.length - 1] || 0;
   const slice = data.slice(-period);
@@ -100,7 +105,7 @@ function calcMA(closes: number[]) {
   return { ma5, ma20, crossUp, above };
 }
 
-// ─── 볼린저밴드 ─────────────────────────────────────
+// ─── 볼린저밴드 ──────────────────────────────────
 function calcBollinger(closes: number[], period = 20, mult = 2) {
   if (closes.length < period) return { upper: 0, middle: 0, lower: 0, position: "middle" as const };
   const slice = closes.slice(-period);
@@ -117,7 +122,7 @@ function calcBollinger(closes: number[], period = 20, mult = 2) {
   return { upper, middle, lower, position };
 }
 
-// ─── 거래량 분석 ────────────────────────────────────
+// ─── 거래량 분석 ─────────────────────────────────
 function calcVolume(volumes: number[], period = 20) {
   if (volumes.length < period + 1) return { ratio: 100, spike: false };
   const avg = volumes.slice(-period - 1, -1).reduce((s, v) => s + v, 0) / period;
@@ -126,116 +131,7 @@ function calcVolume(volumes: number[], period = 20) {
   return { ratio, spike: ratio >= 200 };
 }
 
-// ─── 종합 신호 분석 ────────────────────────────────
-export function analyzeSignal(candles: DailyCandle[]): SignalResult {
-  if (candles.length < 26) {
-    return {
-      indicators: [],
-      matchCount: 0,
-      strength: "none",
-      side: "hold",
-      comment: "데이터 부족 (최소 26일 필요)",
-      raw: { rsi: 50, macd: 0, macdSignal: 0, macdCrossover: "none", ma5: 0, ma20: 0, bbPosition: "middle", volumeRatio: 100, atr: 0 },
-    };
-  }
-
-  const closes = candles.map((c) => c.close);
-  const volumes = candles.map((c) => c.volume);
-  const current = closes[closes.length - 1];
-
-  // 1. RSI
-  const rsi = calcRSI(closes);
-  const rsiBuy = rsi < 30;
-  const rsiSell = rsi > 70;
-
-  // 2. MACD
-  const macd = calcMACD(closes);
-  const macdBuy = macd.crossover === "golden";
-  const macdSell = macd.crossover === "dead";
-
-  // 3. 이동평균
-  const ma = calcMA(closes);
-  const maBuy = ma.crossUp || ma.above;
-  const maSell = !ma.above;
-
-  // 4. 볼린저밴드
-  const bb = calcBollinger(closes);
-  const bbBuy = bb.position === "below";
-  const bbSell = bb.position === "above";
-
-  // 5. 거래량
-  const vol = calcVolume(volumes);
-
-  // 매수 신호 집계
-  const buySignals = [rsiBuy, macdBuy, maBuy, bbBuy, vol.spike];
-  const sellSignals = [rsiSell, macdSell, maSell, bbSell, vol.spike];
-  const buyCount = buySignals.filter(Boolean).length;
-  const sellCount = sellSignals.filter(Boolean).length;
-
-  const indicators: IndicatorResult[] = [
-    {
-      name: "RSI",
-      value: rsi.toFixed(1),
-      desc: rsi < 30 ? "과매도 구간" : rsi > 70 ? "과매수 구간" : "중립 구간",
-      hit: rsiBuy,
-    },
-    {
-      name: "MACD",
-      value: macd.crossover === "golden" ? "골든크로스" : macd.crossover === "dead" ? "데드크로스" : "대기",
-      desc: macd.crossover === "golden" ? "추세 상승 전환" : macd.crossover === "dead" ? "추세 하락 전환" : "신호 없음",
-      hit: macdBuy,
-    },
-    {
-      name: "이동평균",
-      value: ma.above ? "5일>20일" : "5일<20일",
-      desc: ma.crossUp ? "돌파 확인" : ma.above ? "상승 추세" : "하락 추세",
-      hit: maBuy,
-    },
-    {
-      name: "볼린저",
-      value: bb.position === "below" ? "하단 이탈" : bb.position === "above" ? "상단 돌파" : "밴드 내",
-      desc: bb.position === "below" ? "반등 가능성" : bb.position === "above" ? "과열 주의" : "중립",
-      hit: bbBuy,
-    },
-    {
-      name: "거래량",
-      value: `${Math.round(vol.ratio)}%`,
-      desc: "20일 평균 대비",
-      hit: vol.spike,
-    },
-  ];
-
-  // 매수 vs 매도 판단
-  let side: "buy" | "sell" | "hold" = "hold";
-  let matchCount = 0;
-  let strength: "strong" | "weak" | "none" = "none";
-
-  if (buyCount >= sellCount) {
-    matchCount = buyCount;
-    if (buyCount >= 4) { strength = "strong"; side = "buy"; }
-    else if (buyCount >= 2) { strength = "weak"; side = "buy"; }
-  } else {
-    matchCount = sellCount;
-    if (sellCount >= 4) { strength = "strong"; side = "sell"; }
-    else if (sellCount >= 2) { strength = "weak"; side = "sell"; }
-  }
-
-  const comment = side === "buy"
-    ? `매수 신호 ${matchCount}/5. ${rsiBuy ? "RSI 과매도 반등 기대. " : ""}${macdBuy ? "MACD 골든크로스 확인. " : ""}${vol.spike ? "거래량 급증으로 신뢰도 높음." : ""}`
-    : side === "sell"
-    ? `매도 신호 ${matchCount}/5. ${rsiSell ? "RSI 과매수 구간. " : ""}${macdSell ? "MACD 데드크로스 확인. " : ""}`
-    : "뚜렷한 매매 신호 없음. 대기.";
-
-  const atr = calcATR(candles);
-  const raw: SignalRaw = {
-    rsi, macd: macd.macd, macdSignal: macd.signal, macdCrossover: macd.crossover,
-    ma5: ma.ma5, ma20: ma.ma20, bbPosition: bb.position, volumeRatio: vol.ratio, atr,
-  };
-
-  return { indicators, matchCount, strength, side, comment, raw };
-}
-
-// ─── ATR (Average True Range) ────────────────────────
+// ─── ATR (Average True Range) ────────────────────
 export function calcATR(candles: DailyCandle[], period = 14): number {
   if (candles.length < period + 1) return 0;
   const trs: number[] = [];
@@ -251,7 +147,161 @@ export function calcATR(candles: DailyCandle[], period = 14): number {
   return recent.reduce((s, v) => s + v, 0) / recent.length;
 }
 
-// ─── 손절/익절/트레일링 스탑 판단 ────────────────────
+// ─── ADX (Average Directional Index) ─────────────
+function calcADX(candles: DailyCandle[], period = 14): number {
+  if (candles.length < period * 2) return 25; // 기본값 (중립)
+  const pDMs: number[] = [], nDMs: number[] = [], trs: number[] = [];
+
+  for (let i = 1; i < candles.length; i++) {
+    const upMove = candles[i].high - candles[i - 1].high;
+    const downMove = candles[i - 1].low - candles[i].low;
+    pDMs.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    nDMs.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    trs.push(Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i - 1].close),
+      Math.abs(candles[i].low - candles[i - 1].close),
+    ));
+  }
+
+  // Smoothed averages
+  const smooth = (arr: number[]) => {
+    const result = [arr.slice(0, period).reduce((s, v) => s + v, 0)];
+    for (let i = period; i < arr.length; i++) {
+      result.push(result[result.length - 1] - result[result.length - 1] / period + arr[i]);
+    }
+    return result;
+  };
+
+  const sTR = smooth(trs);
+  const sPDM = smooth(pDMs);
+  const sNDM = smooth(nDMs);
+
+  const dxs: number[] = [];
+  for (let i = 0; i < sTR.length; i++) {
+    if (sTR[i] === 0) continue;
+    const pDI = (sPDM[i] / sTR[i]) * 100;
+    const nDI = (sNDM[i] / sTR[i]) * 100;
+    const sum = pDI + nDI;
+    if (sum > 0) dxs.push((Math.abs(pDI - nDI) / sum) * 100);
+  }
+
+  if (dxs.length < period) return 25;
+  const adx = dxs.slice(-period).reduce((s, v) => s + v, 0) / period;
+  return adx;
+}
+
+// ─── 가중치 점수제 종합 신호 분석 ────────────────
+export function analyzeSignal(candles: DailyCandle[]): SignalResult {
+  const emptyRaw: SignalRaw = { rsi: 50, macd: 0, macdSignal: 0, macdCrossover: "none", ma5: 0, ma20: 0, bbPosition: "middle", volumeRatio: 100, atr: 0, adx: 25, regime: "ranging" };
+
+  if (candles.length < 26) {
+    return { indicators: [], totalScore: 0, matchCount: 0, strength: "none", side: "hold", comment: "데이터 부족 (최소 26일 필요)", raw: emptyRaw };
+  }
+
+  const closes = candles.map((c) => c.close);
+  const volumes = candles.map((c) => c.volume);
+
+  // 지표 계산
+  const rsi = calcRSI(closes);
+  const macd = calcMACD(closes);
+  const ma = calcMA(closes);
+  const bb = calcBollinger(closes);
+  const vol = calcVolume(volumes);
+  const atr = calcATR(candles);
+  const adx = calcADX(candles);
+
+  // 시장 레짐 감지: ADX > 25 = 추세장, ≤ 25 = 횡보장
+  const regime: "trending" | "ranging" = adx > 25 ? "trending" : "ranging";
+
+  // ── #4 가중치: 레짐에 따라 차등 ──
+  // 추세장: MACD(30) + MA(25) 비중 ↑ / 횡보장: RSI(25) + 볼린저(25) 비중 ↑
+  const weights = regime === "trending"
+    ? { rsi: 10, macd: 30, ma: 25, bb: 10, vol: 25 }
+    : { rsi: 25, macd: 15, ma: 15, bb: 25, vol: 20 };
+
+  // 매수/매도 판정
+  const rsiBuy = rsi < 30, rsiSell = rsi > 70;
+  const macdBuy = macd.crossover === "golden", macdSell = macd.crossover === "dead";
+  const maBuy = ma.crossUp || ma.above, maSell = !ma.above;
+  const bbBuy = bb.position === "below", bbSell = bb.position === "above";
+
+  // 점수 계산 (hit이면 해당 가중치 점수 부여)
+  const buyScores = [
+    { hit: rsiBuy, w: weights.rsi },
+    { hit: macdBuy, w: weights.macd },
+    { hit: maBuy, w: weights.ma },
+    { hit: bbBuy, w: weights.bb },
+    { hit: vol.spike, w: weights.vol },
+  ];
+  const sellScores = [
+    { hit: rsiSell, w: weights.rsi },
+    { hit: macdSell, w: weights.macd },
+    { hit: maSell, w: weights.ma },
+    { hit: bbSell, w: weights.bb },
+    { hit: vol.spike, w: weights.vol },
+  ];
+
+  const buyTotal = buyScores.reduce((s, x) => s + (x.hit ? x.w : 0), 0);
+  const sellTotal = sellScores.reduce((s, x) => s + (x.hit ? x.w : 0), 0);
+  const buyCount = buyScores.filter((x) => x.hit).length;
+  const sellCount = sellScores.filter((x) => x.hit).length;
+
+  const indicators: IndicatorResult[] = [
+    { name: "RSI", value: rsi.toFixed(1), desc: rsi < 30 ? "과매도 구간" : rsi > 70 ? "과매수 구간" : "중립 구간", hit: rsiBuy, score: rsiBuy ? weights.rsi : 0, weight: weights.rsi },
+    { name: "MACD", value: macd.crossover === "golden" ? "골든크로스" : macd.crossover === "dead" ? "데드크로스" : "대기", desc: macd.crossover === "golden" ? "추세 상승 전환" : macd.crossover === "dead" ? "추세 하락 전환" : "신호 없음", hit: macdBuy, score: macdBuy ? weights.macd : 0, weight: weights.macd },
+    { name: "이동평균", value: ma.above ? "5일>20일" : "5일<20일", desc: ma.crossUp ? "돌파 확인" : ma.above ? "상승 추세" : "하락 추세", hit: maBuy, score: maBuy ? weights.ma : 0, weight: weights.ma },
+    { name: "볼린저", value: bb.position === "below" ? "하단 이탈" : bb.position === "above" ? "상단 돌파" : "밴드 내", desc: bb.position === "below" ? "반등 가능성" : bb.position === "above" ? "과열 주의" : "중립", hit: bbBuy, score: bbBuy ? weights.bb : 0, weight: weights.bb },
+    { name: "거래량", value: `${Math.round(vol.ratio)}%`, desc: "20일 평균 대비", hit: vol.spike, score: vol.spike ? weights.vol : 0, weight: weights.vol },
+  ];
+
+  // 가중 점수 기반 판단 (기존 다수결도 병행)
+  let side: "buy" | "sell" | "hold" = "hold";
+  let totalScore = 0;
+  let matchCount = 0;
+  let strength: "strong" | "weak" | "none" = "none";
+
+  if (buyTotal >= sellTotal) {
+    totalScore = buyTotal;
+    matchCount = buyCount;
+    // 강한: 70점 이상 OR 4개 이상 / 약한: 40점 이상 OR 2개 이상
+    if (buyTotal >= 70 || buyCount >= 4) { strength = "strong"; side = "buy"; }
+    else if (buyTotal >= 40 || buyCount >= 2) { strength = "weak"; side = "buy"; }
+  } else {
+    totalScore = sellTotal;
+    matchCount = sellCount;
+    if (sellTotal >= 70 || sellCount >= 4) { strength = "strong"; side = "sell"; }
+    else if (sellTotal >= 40 || sellCount >= 2) { strength = "weak"; side = "sell"; }
+  }
+
+  const comment = side === "buy"
+    ? `매수 신호 ${matchCount}/5 (${totalScore}점, ${regime === "trending" ? "추세장" : "횡보장"}). ${rsiBuy ? "RSI 과매도. " : ""}${macdBuy ? "MACD 골든크로스. " : ""}${vol.spike ? "거래량 급증." : ""}`
+    : side === "sell"
+    ? `매도 신호 ${matchCount}/5 (${totalScore}점). ${rsiSell ? "RSI 과매수. " : ""}${macdSell ? "MACD 데드크로스. " : ""}`
+    : `대기 (${regime === "trending" ? "추세장" : "횡보장"}, ADX ${adx.toFixed(0)}).`;
+
+  const raw: SignalRaw = {
+    rsi, macd: macd.macd, macdSignal: macd.signal, macdCrossover: macd.crossover,
+    ma5: ma.ma5, ma20: ma.ma20, bbPosition: bb.position, volumeRatio: vol.ratio, atr, adx, regime,
+  };
+
+  return { indicators, totalScore, matchCount, strength, side, comment, raw };
+}
+
+// ─── ATR 기반 동적 손절/익절 계산 ─────────────────
+export function calcDynamicRisk(atr: number, currentPrice: number) {
+  // ATR × 2 = 손절, ATR × 3 = 익절 (비율로 변환)
+  const stopLossPercent = currentPrice > 0 ? -((atr * 2) / currentPrice) * 100 : -5;
+  const takeProfitPercent = currentPrice > 0 ? ((atr * 3) / currentPrice) * 100 : 5;
+  const trailingPercent = currentPrice > 0 ? -((atr * 1.5) / currentPrice) * 100 : -3;
+  return {
+    stopLoss: Math.min(stopLossPercent, -2),    // 최소 -2%
+    takeProfit: Math.max(takeProfitPercent, 3),  // 최소 +3%
+    trailingStop: Math.min(trailingPercent, -1.5), // 최소 -1.5%
+  };
+}
+
+// ─── 손절/익절/트레일링 스탑 판단 ────────────────
 export interface RiskCheckResult {
   action: "stop_loss" | "take_profit" | "trailing_stop" | "hold";
   reason: string;
@@ -262,26 +312,21 @@ export function checkRisk(
   avgPrice: number,
   currentPrice: number,
   highSinceBuy: number,
-  stopLoss: number,    // 예: -5 (%)
-  takeProfit: number,  // 예: +5 (%)
-  trailingStop: number // 예: -3 (%)
+  stopLoss: number,
+  takeProfit: number,
+  trailingStop: number
 ): RiskCheckResult {
   const pnlRate = ((currentPrice - avgPrice) / avgPrice) * 100;
   const fromHigh = ((currentPrice - highSinceBuy) / highSinceBuy) * 100;
 
-  // 손절
   if (pnlRate <= stopLoss) {
-    return { action: "stop_loss", reason: `손절 라인 도달 (${pnlRate.toFixed(1)}% ≤ ${stopLoss}%)`, currentPnlRate: pnlRate };
+    return { action: "stop_loss", reason: `손절 (${pnlRate.toFixed(1)}% ≤ ${stopLoss.toFixed(1)}%)`, currentPnlRate: pnlRate };
   }
-
-  // 익절
   if (pnlRate >= takeProfit) {
-    return { action: "take_profit", reason: `익절 라인 도달 (${pnlRate.toFixed(1)}% ≥ +${takeProfit}%)`, currentPnlRate: pnlRate };
+    return { action: "take_profit", reason: `익절 (${pnlRate.toFixed(1)}% ≥ +${takeProfit.toFixed(1)}%)`, currentPnlRate: pnlRate };
   }
-
-  // 트레일링 스탑 (수익 구간에서만)
   if (pnlRate > 0 && fromHigh <= trailingStop) {
-    return { action: "trailing_stop", reason: `트레일링 스탑 (고점 대비 ${fromHigh.toFixed(1)}% ≤ ${trailingStop}%)`, currentPnlRate: pnlRate };
+    return { action: "trailing_stop", reason: `트레일링 (고점 대비 ${fromHigh.toFixed(1)}% ≤ ${trailingStop.toFixed(1)}%)`, currentPnlRate: pnlRate };
   }
 
   return { action: "hold", reason: "보유 유지", currentPnlRate: pnlRate };
