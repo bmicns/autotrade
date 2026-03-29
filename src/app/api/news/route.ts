@@ -36,13 +36,13 @@ function getTimeAgo(date: Date): string {
 
 // Google News RSS 파싱 (CDATA 또는 plain text 모두 처리)
 function parseGoogleRSS(xml: string, limit = 5): NewsItem[] {
-  const items: NewsItem[] = [];
+  const allItems: Array<NewsItem & { _ts: number }> = [];
 
   // <item>...</item> 블록 추출
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
   let match;
 
-  while ((match = itemRegex.exec(xml)) !== null && items.length < limit) {
+  while ((match = itemRegex.exec(xml)) !== null) {
     const block = match[1];
 
     // title: CDATA 또는 plain
@@ -68,14 +68,17 @@ function parseGoogleRSS(xml: string, limit = 5): NewsItem[] {
 
     // pubDate
     const dateMatch = block.match(/<pubDate>(.*?)<\/pubDate>/);
-    const time = dateMatch ? getTimeAgo(new Date(dateMatch[1].trim())) : "";
+    const pubDate = dateMatch ? new Date(dateMatch[1].trim()) : new Date(0);
+    const time = dateMatch ? getTimeAgo(pubDate) : "";
 
     if (rawTitle) {
-      items.push({ title: rawTitle, source, time, url });
+      allItems.push({ title: rawTitle, source, time, url, _ts: pubDate.getTime() });
     }
   }
 
-  return items;
+  // 최신순 정렬 후 limit 적용
+  allItems.sort((a, b) => b._ts - a._ts);
+  return allItems.slice(0, limit).map(({ _ts, ...item }) => item);
 }
 
 // 네이버 금융 뉴스 (Google News RSS 경유)
