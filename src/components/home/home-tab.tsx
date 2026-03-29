@@ -75,7 +75,11 @@ export function HomeTab() {
   return (
     <div>
       {/* ── 히어로 ── */}
-      <div style={{ padding: "60px 20px 10px", background: COLORS.hero, textAlign: "right" }}>
+      <div style={{
+        padding: "60px 20px 10px", textAlign: "right", position: "relative" as const,
+        background: COLORS.hero,
+        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100' viewBox='0 0 56 100'%3E%3Cpath d='M28 66L0 50L0 16L28 0L56 16L56 50L28 66ZM28 100L0 84L0 50L28 34L56 50L56 84L28 100Z' fill='%23ffffff' fill-opacity='0.04'/%3E%3C/svg%3E")`,
+      }}>
         {kisLoading && (
           <div style={{ textAlign: "left", marginBottom: 8 }}>
             <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>KIS 데이터 로딩 중...</span>
