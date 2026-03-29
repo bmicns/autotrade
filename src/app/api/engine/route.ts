@@ -229,7 +229,7 @@ export async function GET(req: NextRequest) {
   const kstHour = new Date(Date.now() + 9 * 3600000).getUTCHours();
   const kstMin = new Date(Date.now() + 9 * 3600000).getUTCMinutes();
   const kstTime = kstHour * 100 + kstMin;
-  const inSession = (kstTime >= 900 && kstTime <= 1140) || (kstTime >= 1250 && kstTime <= 1500);
+  const inSession = (kstTime >= 900 && kstTime <= 1150) || (kstTime >= 1250 && kstTime <= 1510);
   if (!inSession) {
     return NextResponse.json({ skipped: true, reason: `장 외 시간 (KST ${kstHour}:${String(kstMin).padStart(2, "0")})` });
   }
