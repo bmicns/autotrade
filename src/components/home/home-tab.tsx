@@ -184,7 +184,7 @@ export function HomeTab() {
         );
       })}
 
-      {/* ── 뉴스 탭 (네이버 뉴스 / 공시정보) ── */}
+      {/* ── 뉴스 탭 (구글 뉴스 / 공시정보) ── */}
       <div style={{ padding: "20px 20px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>시장 뉴스</span>
         <div style={{ display: "flex", gap: 4, background: COLORS.sub, borderRadius: 8, padding: 3 }}>
@@ -200,7 +200,7 @@ export function HomeTab() {
                 boxShadow: newsTab === t ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
               }}
             >
-              {t === "naver" ? "네이버 뉴스" : "공시정보"}
+              {t === "naver" ? "구글 뉴스" : "공시정보"}
             </button>
           ))}
         </div>
