@@ -18,8 +18,8 @@ export function BottomBar() {
 
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 z-[100] flex justify-around pb-[22px] pt-2 backdrop-blur-xl md:hidden"
-      style={{ background: "rgba(255,255,255,0.96)", borderTop: `1px solid ${COLORS.line}` }}
+      className="fixed bottom-0 left-0 right-0 z-[100] flex justify-around pb-[22px] backdrop-blur-xl md:hidden"
+      style={{ background: "rgba(255,255,255,0.96)", borderTop: `1px solid ${COLORS.line}`, paddingTop: 14 }}
     >
       {TABS.map((t) => {
         const on = tab === t.id;
