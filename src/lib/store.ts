@@ -44,6 +44,19 @@ export interface KISConfig {
   tokenExpiry?: string;
 }
 
+export interface TradeSettings {
+  maxAmountPerTrade: number;    // 1회 매매 한도 (만원)
+  maxTradesPerDay: number;      // 1일 최대 횟수
+  stopLoss: number;             // 손절 라인 (%)
+  takeProfit: number;           // 1차 익절 (%)
+  takeProfitRatio: number;      // 익절 비율 (%)
+  trailingStop: number;         // 트레일링 스탑 (%)
+  morningStart: string;         // 오전 세션 시작
+  morningEnd: string;           // 오전 세션 종료
+  afternoonStart: string;       // 오후 세션 시작
+  afternoonEnd: string;         // 오후 세션 종료
+}
+
 interface AppState {
   tab: Tab;
   setTab: (tab: Tab) => void;
@@ -71,6 +84,10 @@ interface AppState {
   // KIS API 설정
   kisConfig: KISConfig;
   setKISConfig: (c: KISConfig) => void;
+
+  // 매매 설정
+  tradeSettings: TradeSettings;
+  setTradeSettings: (s: TradeSettings) => void;
 
   // KIS 데이터 로딩
   kisLoading: boolean;
@@ -126,6 +143,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     const next = [t, ...get().trades];
     saveToStorage("nx-trades", next);
     set({ trades: next });
+  },
+
+  tradeSettings: loadFromStorage<TradeSettings>("nx-trade-settings", {
+    maxAmountPerTrade: 100,
+    maxTradesPerDay: 5,
+    stopLoss: 5,
+    takeProfit: 5,
+    takeProfitRatio: 50,
+    trailingStop: 3,
+    morningStart: "09:30",
+    morningEnd: "11:30",
+    afternoonStart: "13:00",
+    afternoonEnd: "14:50",
+  }),
+  setTradeSettings: (s) => {
+    saveToStorage("nx-trade-settings", s);
+    set({ tradeSettings: s });
   },
 
   kisConfig: { appKey: "", appSecret: "", accountNo: "" },
@@ -200,6 +234,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     } catch { /* localStorage 폴백 */ }
 
-    set({ holdings, trades, kisConfig });
+    const tradeSettings = loadFromStorage<TradeSettings>("nx-trade-settings", get().tradeSettings);
+    set({ holdings, trades, kisConfig, tradeSettings });
   },
 }));
