@@ -17,12 +17,25 @@ export interface IndicatorResult {
   hit: boolean; // 매수 신호 충족 여부
 }
 
+export interface SignalRaw {
+  rsi: number;
+  macd: number;
+  macdSignal: number;
+  macdCrossover: string;
+  ma5: number;
+  ma20: number;
+  bbPosition: string;
+  volumeRatio: number;
+  atr: number;
+}
+
 export interface SignalResult {
   indicators: IndicatorResult[];
   matchCount: number;      // 충족 지표 수
   strength: "strong" | "weak" | "none";  // 강한(4+) / 약한(2-3) / 없음(0-1)
   side: "buy" | "sell" | "hold";
   comment: string;
+  raw: SignalRaw;          // 지표 원시값 (성과 분석용)
 }
 
 // ─── RSI (Relative Strength Index) ──────────────────
@@ -122,6 +135,7 @@ export function analyzeSignal(candles: DailyCandle[]): SignalResult {
       strength: "none",
       side: "hold",
       comment: "데이터 부족 (최소 26일 필요)",
+      raw: { rsi: 50, macd: 0, macdSignal: 0, macdCrossover: "none", ma5: 0, ma20: 0, bbPosition: "middle", volumeRatio: 100, atr: 0 },
     };
   }
 
@@ -212,7 +226,29 @@ export function analyzeSignal(candles: DailyCandle[]): SignalResult {
     ? `매도 신호 ${matchCount}/5. ${rsiSell ? "RSI 과매수 구간. " : ""}${macdSell ? "MACD 데드크로스 확인. " : ""}`
     : "뚜렷한 매매 신호 없음. 대기.";
 
-  return { indicators, matchCount, strength, side, comment };
+  const atr = calcATR(candles);
+  const raw: SignalRaw = {
+    rsi, macd: macd.macd, macdSignal: macd.signal, macdCrossover: macd.crossover,
+    ma5: ma.ma5, ma20: ma.ma20, bbPosition: bb.position, volumeRatio: vol.ratio, atr,
+  };
+
+  return { indicators, matchCount, strength, side, comment, raw };
+}
+
+// ─── ATR (Average True Range) ────────────────────────
+export function calcATR(candles: DailyCandle[], period = 14): number {
+  if (candles.length < period + 1) return 0;
+  const trs: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const tr = Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i - 1].close),
+      Math.abs(candles[i].low - candles[i - 1].close),
+    );
+    trs.push(tr);
+  }
+  const recent = trs.slice(-period);
+  return recent.reduce((s, v) => s + v, 0) / recent.length;
 }
 
 // ─── 손절/익절/트레일링 스탑 판단 ────────────────────

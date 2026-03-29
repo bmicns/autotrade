@@ -1,72 +1,94 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
-import { analyzeSignal, checkRisk, type DailyCandle } from "@/lib/kis/indicators";
+import { analyzeSignal, checkRisk, type DailyCandle, type SignalResult } from "@/lib/kis/indicators";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
 
-// Vercel Cron에서 1분마다 호출
-// 1. 보유종목 시세 감시 → 손절/익절/트레일링 체크
-// 2. 관심종목 신호 분석 → 자동체결 or 승인 대기
-
 interface EngineConfig {
   appKey: string;
   appSecret: string;
   accountNo: string;
   token: string;
-  stopLoss: number;      // 기본 -5
-  takeProfit: number;    // 기본 +5
-  trailingStop: number;  // 기본 -3
-  maxPerTrade: number;   // 1회 한도 (원)
-  maxDailyTrades: number; // 1일 최대 횟수
-  watchlist?: string[];   // 관심종목 코드 리스트
+  stopLoss: number;
+  takeProfit: number;
+  trailingStop: number;
+  maxPerTrade: number;
+  maxDailyTrades: number;
+  watchlist?: string[];
 }
 
-// 코스피 급등주 탐색 (등락률 상위 + 거래량 급증)
+// ─── Supabase 포지션 관리 ────────────────────────
+async function openPosition(code: string, name: string | null, price: number, qty: number, signal: SignalResult) {
+  try {
+    await supabase.from("positions").insert({
+      stock_code: code,
+      stock_name: name,
+      entry_price: price,
+      entry_qty: qty,
+      entry_signal: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount },
+      signal_strength: signal.strength,
+      status: "open",
+    });
+  } catch { /* 테이블 미존재 시 무시 */ }
+}
+
+async function closePosition(code: string, exitPrice: number, exitQty: number, exitReason: string) {
+  try {
+    // open 포지션 찾기
+    const { data } = await supabase
+      .from("positions")
+      .select("*")
+      .eq("stock_code", code)
+      .eq("status", "open")
+      .order("entry_date", { ascending: true })
+      .limit(1);
+
+    if (!data || data.length === 0) return;
+    const pos = data[0];
+
+    const entryPrice = Number(pos.entry_price);
+    const pnlAmount = (exitPrice - entryPrice) * exitQty;
+    const pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 : 0;
+    const entryDate = new Date(pos.entry_date);
+    const holdDays = Math.max(1, Math.ceil((Date.now() - entryDate.getTime()) / 86400000));
+
+    await supabase.from("positions").update({
+      exit_price: exitPrice,
+      exit_qty: exitQty,
+      exit_date: new Date().toISOString(),
+      exit_reason: exitReason,
+      pnl_amount: Math.round(pnlAmount),
+      pnl_percent: Math.round(pnlPercent * 100) / 100,
+      hold_days: holdDays,
+      status: "closed",
+    }).eq("id", pos.id);
+  } catch { /* 테이블 미존재 시 무시 */ }
+}
+
+async function logEngineRun(tradeCount: number, actions: unknown[], scannedCount: number, durationMs: number, error?: string) {
+  try {
+    await supabase.from("engine_runs").insert({
+      trade_count: tradeCount,
+      actions,
+      scanned_count: scannedCount,
+      duration_ms: durationMs,
+      error: error || null,
+    });
+  } catch { /* 테이블 미존재 시 무시 */ }
+}
+
+// ─── 코스피 급등주 탐색 ─────────────────────────
 async function scanSurgeStocks(config: EngineConfig): Promise<string[]> {
   const codes = new Set<string>();
 
-  // 1. 등락률 상위 30종목 (코스피)
-  try {
-    const params = new URLSearchParams({
-      fid_cond_mrkt_div_code: "J",     // 코스피
-      fid_cond_scr_div_code: "20170",  // 등락률
-      fid_input_iscd: "0001",          // 코스피 전체
-      fid_rank_sort_cls_code: "0",     // 상승률 순
-      fid_input_cnt_1: "0",            // 가격 하한 없음
-      fid_input_cnt_2: "",             // 가격 상한 없음
-      fid_div_cls_code: "0",
-      fid_trgt_cls_code: "0",
-      fid_trgt_exls_cls_code: "0",
-      fid_input_price_1: "",
-      fid_input_price_2: "",
-      fid_vol_cnt: "",
-      fid_input_date_1: "",
-    });
-    const res = await fetch(
-      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`,
-      { headers: headers(config, "FHPST01700000") }
-    );
-    if (res.ok) {
-      const data = await res.json();
-      const items = data.output || [];
-      for (const item of items.slice(0, 30)) {
-        const code = item.stck_shrn_iscd || item.mksc_shrn_iscd;
-        const rate = Number(item.prdy_ctrt) || 0;
-        // 3% 이상 상승 + 거래대금 10억 이상
-        if (code && rate >= 3) codes.add(code);
-      }
-    }
-  } catch { /* 등락률 조회 실패 무시 */ }
-
-  // 2. 거래량 급증 상위 20종목 (코스피)
   try {
     const params = new URLSearchParams({
       fid_cond_mrkt_div_code: "J",
-      fid_cond_scr_div_code: "20171",  // 거래량
+      fid_cond_scr_div_code: "20170",
       fid_input_iscd: "0001",
       fid_rank_sort_cls_code: "0",
       fid_input_cnt_1: "0",
@@ -85,18 +107,46 @@ async function scanSurgeStocks(config: EngineConfig): Promise<string[]> {
     );
     if (res.ok) {
       const data = await res.json();
-      const items = data.output || [];
-      for (const item of items.slice(0, 20)) {
+      for (const item of (data.output || []).slice(0, 30)) {
+        const code = item.stck_shrn_iscd || item.mksc_shrn_iscd;
+        if (code && (Number(item.prdy_ctrt) || 0) >= 3) codes.add(code);
+      }
+    }
+  } catch { /* ignore */ }
+
+  try {
+    const params = new URLSearchParams({
+      fid_cond_mrkt_div_code: "J",
+      fid_cond_scr_div_code: "20171",
+      fid_input_iscd: "0001",
+      fid_rank_sort_cls_code: "0",
+      fid_input_cnt_1: "0",
+      fid_input_cnt_2: "",
+      fid_div_cls_code: "0",
+      fid_trgt_cls_code: "0",
+      fid_trgt_exls_cls_code: "0",
+      fid_input_price_1: "",
+      fid_input_price_2: "",
+      fid_vol_cnt: "",
+      fid_input_date_1: "",
+    });
+    const res = await fetch(
+      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`,
+      { headers: headers(config, "FHPST01700000") }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      for (const item of (data.output || []).slice(0, 20)) {
         const code = item.stck_shrn_iscd || item.mksc_shrn_iscd;
         if (code) codes.add(code);
       }
     }
-  } catch { /* 거래량 조회 실패 무시 */ }
+  } catch { /* ignore */ }
 
   return Array.from(codes);
 }
 
-// KIS 헤더
+// ─── KIS API 유틸 ───────────────────────────────
 function headers(config: EngineConfig, trId: string) {
   return {
     "Content-Type": "application/json; charset=utf-8",
@@ -107,7 +157,6 @@ function headers(config: EngineConfig, trId: string) {
   };
 }
 
-// 현재가 조회
 async function getPrice(config: EngineConfig, code: string) {
   const params = new URLSearchParams({ fid_cond_mrkt_div_code: "J", fid_input_iscd: code });
   const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`, {
@@ -118,7 +167,6 @@ async function getPrice(config: EngineConfig, code: string) {
   return data.output;
 }
 
-// 일별 시세 (지표 계산용)
 async function getDailyCandles(config: EngineConfig, code: string): Promise<DailyCandle[]> {
   const params = new URLSearchParams({
     fid_cond_mrkt_div_code: "J",
@@ -140,10 +188,9 @@ async function getDailyCandles(config: EngineConfig, code: string): Promise<Dail
     high: Number(d.stck_hgpr) || 0,
     low: Number(d.stck_lwpr) || 0,
     volume: Number(d.acml_vol) || 0,
-  })).reverse(); // 오래된 순으로 정렬
+  })).reverse();
 }
 
-// 잔고 조회
 async function getBalance(config: EngineConfig) {
   const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
   const params = new URLSearchParams({
@@ -159,7 +206,6 @@ async function getBalance(config: EngineConfig) {
   return res.json();
 }
 
-// 매도 주문
 async function sellOrder(config: EngineConfig, code: string, qty: number) {
   const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
   const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
@@ -167,14 +213,13 @@ async function sellOrder(config: EngineConfig, code: string, qty: number) {
     headers: headers(config, KIS_TR.SELL),
     body: JSON.stringify({
       CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
-      PDNO: code, ORD_DVSN: "01", // 시장가
+      PDNO: code, ORD_DVSN: "01",
       ORD_QTY: String(qty), ORD_UNPR: "0",
     }),
   });
   return res.json();
 }
 
-// 매수 주문
 async function buyOrder(config: EngineConfig, code: string, qty: number) {
   const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
   const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
@@ -182,20 +227,17 @@ async function buyOrder(config: EngineConfig, code: string, qty: number) {
     headers: headers(config, KIS_TR.BUY),
     body: JSON.stringify({
       CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
-      PDNO: code, ORD_DVSN: "01", // 시장가
+      PDNO: code, ORD_DVSN: "01",
       ORD_QTY: String(qty), ORD_UNPR: "0",
     }),
   });
   return res.json();
 }
 
-// Vercel Cron은 GET으로 호출 — 환경변수에서 KIS 설정 읽기
+// ─── Cron GET ───────────────────────────────────
 export async function GET(req: NextRequest) {
-  // Cron 보안: Vercel Cron에서만 호출 가능
   const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && !process.env.CRON_SECRET) {
-    // CRON_SECRET 미설정이면 허용 (개발 편의)
-  } else if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -207,7 +249,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "KIS 환경변수 미설정" }, { status: 400 });
   }
 
-  // 토큰 발급
   const tokenRes = await fetch(`${KIS_VTS_BASE}/oauth2/tokenP`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -216,7 +257,6 @@ export async function GET(req: NextRequest) {
   if (!tokenRes.ok) return NextResponse.json({ error: "토큰 발급 실패" }, { status: 500 });
   const tokenData = await tokenRes.json();
 
-  // Supabase에서 watchlist 조회
   const { data: watchlistData } = await supabase
     .from("watchlist")
     .select("code")
@@ -233,7 +273,7 @@ export async function GET(req: NextRequest) {
   return runEngine(config);
 }
 
-// 클라이언트에서 수동 실행 (POST)
+// ─── 수동 POST ──────────────────────────────────
 export async function POST(req: NextRequest) {
   const config: EngineConfig = await req.json();
   if (!config.token || !config.accountNo) {
@@ -242,7 +282,11 @@ export async function POST(req: NextRequest) {
   return runEngine(config);
 }
 
+// ─── 엔진 본체 ──────────────────────────────────
 async function runEngine(config: EngineConfig) {
+  const startTime = Date.now();
+  let scannedCount = 0;
+
   try {
     const stopLoss = config.stopLoss ?? -5;
     const takeProfit = config.takeProfit ?? 5;
@@ -250,7 +294,7 @@ async function runEngine(config: EngineConfig) {
     const maxPerTrade = config.maxPerTrade ?? 1000000;
     const maxDailyTrades = config.maxDailyTrades ?? 5;
 
-    const actions: Array<{ type: string; code: string; detail: string }> = [];
+    const actions: Array<{ type: string; code: string; name?: string; detail: string }> = [];
     let tradeCount = 0;
 
     // ═══ STEP 1: 보유종목 손절/익절 감시 ═══
@@ -264,43 +308,44 @@ async function runEngine(config: EngineConfig) {
 
       const avgPrice = Number(h.pchs_avg_pric) || 0;
       const currentPrice = Number(h.prpr) || 0;
-      const highPrice = Number(h.stck_hgpr) || currentPrice; // 당일 고가를 고점으로 사용
+      const highPrice = Number(h.stck_hgpr) || currentPrice;
+      const name = h.prdt_name || code;
 
       const risk = checkRisk(avgPrice, currentPrice, highPrice, stopLoss, takeProfit, trailingStop);
 
       if (risk.action !== "hold") {
-        // 자동 매도 실행
         const result = await sellOrder(config, code, qty);
         actions.push({
-          type: risk.action,
-          code,
+          type: risk.action, code, name,
           detail: `${risk.reason} → 매도 ${qty}주 (${result.msg1 || "주문완료"})`,
         });
+
+        // 포지션 종료 기록
+        await closePosition(code, currentPrice, qty, risk.action);
+
         tradeCount++;
-        await new Promise((r) => setTimeout(r, 200)); // API 제한 방지
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
 
     // ═══ STEP 2: 관심종목 신호 분석 (매수) ═══
-    // 관심종목: 요청 body에서 받거나 비어있으면 스킵
     const watchlist: string[] = config.watchlist ?? [];
 
     for (const code of watchlist) {
       if (tradeCount >= maxDailyTrades) break;
-
-      // 이미 보유중이면 스킵
       if (holdings.some((h: Record<string, string>) => h.pdno === code && Number(h.hldg_qty) > 0)) continue;
 
       const candles = await getDailyCandles(config, code);
+      scannedCount++;
       if (candles.length < 26) continue;
 
       const signal = analyzeSignal(candles);
-      await new Promise((r) => setTimeout(r, 200)); // API 제한 방지
+      await new Promise((r) => setTimeout(r, 200));
 
       if (signal.strength === "strong" && signal.side === "buy") {
-        // 강한 매수 신호 → 자동 체결
         const priceData = await getPrice(config, code);
         const price = Number(priceData?.stck_prpr) || 0;
+        const name = priceData?.stck_shrn_iscd || code;
         if (price <= 0) continue;
 
         const qty = Math.floor(maxPerTrade / price);
@@ -308,27 +353,27 @@ async function runEngine(config: EngineConfig) {
 
         const result = await buyOrder(config, code, qty);
         actions.push({
-          type: "auto_buy",
-          code,
+          type: "auto_buy", code, name,
           detail: `강한 신호 ${signal.matchCount}/5 → 자동 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg1 || "주문완료"})`,
         });
+
+        // 포지션 오픈 기록
+        await openPosition(code, name, price, qty, signal);
+
         tradeCount++;
         await new Promise((r) => setTimeout(r, 200));
 
       } else if (signal.strength === "weak" && signal.side === "buy") {
-        // 약한 매수 신호 → 승인 대기 (Supabase signals 테이블에 저장)
         actions.push({
-          type: "pending_approval",
-          code,
+          type: "pending_approval", code,
           detail: `약한 신호 ${signal.matchCount}/5 → 승인 대기. ${signal.comment}`,
         });
       }
     }
 
-    // ═══ STEP 3: 코스피 급등주 스캔 (등락률+거래량 상위) ═══
+    // ═══ STEP 3: 코스피 급등주 스캔 ═══
     if (tradeCount < maxDailyTrades) {
       const surgeStocks = await scanSurgeStocks(config);
-      // watchlist와 보유종목 제외
       const holdingCodes = new Set(holdings.map((h: Record<string, string>) => h.pdno));
       const watchlistSet = new Set(watchlist);
       const candidates = surgeStocks.filter((c) => !holdingCodes.has(c) && !watchlistSet.has(c));
@@ -337,6 +382,7 @@ async function runEngine(config: EngineConfig) {
         if (tradeCount >= maxDailyTrades) break;
 
         const candles = await getDailyCandles(config, code);
+        scannedCount++;
         if (candles.length < 26) continue;
 
         const signal = analyzeSignal(candles);
@@ -345,6 +391,7 @@ async function runEngine(config: EngineConfig) {
         if (signal.strength === "strong" && signal.side === "buy") {
           const priceData = await getPrice(config, code);
           const price = Number(priceData?.stck_prpr) || 0;
+          const name = priceData?.stck_shrn_iscd || code;
           if (price <= 0) continue;
 
           const qty = Math.floor(maxPerTrade / price);
@@ -352,31 +399,38 @@ async function runEngine(config: EngineConfig) {
 
           const result = await buyOrder(config, code, qty);
           actions.push({
-            type: "surge_buy",
-            code,
+            type: "surge_buy", code, name,
             detail: `급등주 강한 신호 ${signal.matchCount}/5 → 자동 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg1 || "주문완료"})`,
           });
+
+          await openPosition(code, name, price, qty, signal);
+
           tradeCount++;
           await new Promise((r) => setTimeout(r, 200));
 
         } else if (signal.strength === "weak" && signal.side === "buy") {
           actions.push({
-            type: "surge_pending",
-            code,
+            type: "surge_pending", code,
             detail: `급등주 약한 신호 ${signal.matchCount}/5 → 승인 대기. ${signal.comment}`,
           });
         }
       }
     }
 
+    const durationMs = Date.now() - startTime;
+    await logEngineRun(tradeCount, actions, scannedCount, durationMs);
+
     return NextResponse.json({
       timestamp: new Date().toISOString(),
       tradeCount,
-      surgeScanned: true,
+      scannedCount,
+      durationMs,
       actions,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "엔진 실행 실패";
+    const durationMs = Date.now() - startTime;
+    await logEngineRun(0, [], scannedCount, durationMs, msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
