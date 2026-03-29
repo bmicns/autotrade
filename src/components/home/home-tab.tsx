@@ -35,10 +35,10 @@ export function HomeTab() {
   const cashBalance = useAppStore((s) => s.cashBalance);
 
   useEffect(() => {
-    if (kisConfig.token && kisConfig.accountNo && !kisConnected && !kisLoading) {
+    if (kisConfig.appKey && kisConfig.accountNo && !kisConnected && !kisLoading) {
       fetchKISData();
     }
-  }, [kisConfig.token, kisConfig.accountNo, kisConnected, kisLoading, fetchKISData]);
+  }, [kisConfig.appKey, kisConfig.accountNo, kisConnected, kisLoading, fetchKISData]);
 
   useEffect(() => {
     fetch("/api/news")

@@ -10,6 +10,7 @@ export function PortfolioTab() {
   const prices = useAppStore((s) => s.prices);
   const kisConnected = useAppStore((s) => s.kisConnected);
   const cashBalance = useAppStore((s) => s.cashBalance);
+  const storeTotalEval = useAppStore((s) => s.totalEval);
 
   const enriched = holdings.map((h) => {
     const real = prices.get(h.code);
@@ -19,7 +20,7 @@ export function PortfolioTab() {
   });
 
   const totalStock = enriched.reduce((s, h) => s + h.cur * h.quantity, 0);
-  const total = totalStock + cashBalance;
+  const total = storeTotalEval > 0 ? storeTotalEval : totalStock + cashBalance;
 
   if (holdings.length === 0) {
     return (

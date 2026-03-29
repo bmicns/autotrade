@@ -178,13 +178,56 @@ export const useAppStore = create<AppState>((set, get) => ({
   kisConnected: false,
 
   fetchKISData: async () => {
-    const { kisConfig } = get();
-    if (!kisConfig.token || !kisConfig.accountNo) return;
+    const { kisConfig, setKISConfig } = get();
+    if (!kisConfig.appKey || !kisConfig.appSecret || !kisConfig.accountNo) return;
 
     set({ kisLoading: true });
+
+    // 토큰 확보: 없거나 만료됐으면 자동 발급
+    let config = { ...kisConfig };
+    const tokenExpired = !config.token || (config.tokenExpiry && new Date(config.tokenExpiry) <= new Date());
+    if (tokenExpired) {
+      try {
+        const res = await fetch("/api/kis/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ appKey: config.appKey, appSecret: config.appSecret }),
+        });
+        const data = await res.json();
+        if (data.token) {
+          config = { ...config, token: data.token, tokenExpiry: new Date(Date.now() + 86400000).toISOString() };
+          setKISConfig(config);
+        } else {
+          set({ kisLoading: false, kisConnected: false });
+          return;
+        }
+      } catch {
+        set({ kisLoading: false, kisConnected: false });
+        return;
+      }
+    }
+
     try {
       // 1. 잔고 조회
-      const balance = await fetchBalance(kisConfig);
+      let balance = await fetchBalance(config);
+
+      // 잔고 실패 시 토큰 재발급 후 1회 재시도
+      if (!balance && config.token) {
+        try {
+          const res = await fetch("/api/kis/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ appKey: config.appKey, appSecret: config.appSecret }),
+          });
+          const data = await res.json();
+          if (data.token) {
+            config = { ...config, token: data.token, tokenExpiry: new Date(Date.now() + 86400000).toISOString() };
+            setKISConfig(config);
+            balance = await fetchBalance(config);
+          }
+        } catch { /* 재시도 실패 → 아래에서 처리 */ }
+      }
+
       if (balance) {
         // KIS 연결 성공 → 더미 제거, KIS 잔고만 표시
         const holdings: Holding[] = balance.holdings.map((h) => ({
@@ -206,9 +249,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         // 보유 종목이 있으면 시세도 조회
         if (holdings.length > 0) {
           const codes = holdings.map((h) => h.code);
-          const priceMap = await fetchPrices(kisConfig, codes);
+          const priceMap = await fetchPrices(config, codes);
           set({ prices: priceMap });
         }
+      } else {
+        set({ kisConnected: false });
       }
     } catch {
       set({ kisConnected: false });
@@ -236,5 +281,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const tradeSettings = loadFromStorage<TradeSettings>("nx-trade-settings", get().tradeSettings);
     set({ holdings, trades, kisConfig, tradeSettings });
+
+    // appKey가 있으면 자동으로 KIS 데이터 로드 (토큰은 fetchKISData가 자동 관리)
+    if (kisConfig.appKey && kisConfig.appSecret && kisConfig.accountNo) {
+      get().fetchKISData();
+    }
   },
 }));
