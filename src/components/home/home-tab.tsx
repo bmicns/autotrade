@@ -75,7 +75,7 @@ export function HomeTab() {
   return (
     <div>
       {/* ── 히어로 ── */}
-      <div style={{ padding: "54px 20px 50px", background: COLORS.hero, textAlign: "right" }}>
+      <div style={{ padding: "65px 20px 10px", background: COLORS.hero, textAlign: "right" }}>
         {kisLoading && (
           <div style={{ textAlign: "left", marginBottom: 8 }}>
             <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>KIS 데이터 로딩 중...</span>
@@ -109,7 +109,7 @@ export function HomeTab() {
 
         {/* 상태 배너 */}
         <div style={{
-          marginTop: 14, padding: "9px 14px", borderRadius: 12,
+          marginTop: 20, marginBottom: 10, padding: "9px 14px", borderRadius: 12,
           background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)",
           display: "flex", alignItems: "center", justifyContent: "space-between",
         }}>
