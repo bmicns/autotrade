@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
-import { analyzeSignal, calcATR, calcDynamicRisk, checkRisk, type DailyCandle, type SignalResult } from "@/lib/kis/indicators";
+import { analyzeSignal, analyzeSignalWithWeights, calcATR, calcDynamicRisk, checkRisk, type DailyCandle, type SignalResult } from "@/lib/kis/indicators";
+import { runLearning, type LearningResult } from "@/lib/learning";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -270,13 +271,21 @@ async function runEngine(config: EngineConfig) {
   let scannedCount = 0;
 
   try {
-    let stopLoss = config.stopLoss ?? -5;
-    let takeProfit = config.takeProfit ?? 5;
-    let trailingStop = config.trailingStop ?? -3;
+    // ── 자가 학습: 과거 성과 기반 파라미터 자동 조정 ──
+    let learning: LearningResult | null = null;
+    try { learning = await runLearning(); } catch { /* 학습 실패 시 기본값 사용 */ }
+
+    // 학습된 리스크 파라미터 적용 (학습 결과 있으면 덮어쓰기)
+    let stopLoss = learning?.risk.source === "learned" ? learning.risk.stopLoss : (config.stopLoss ?? -5);
+    let takeProfit = learning?.risk.source === "learned" ? learning.risk.takeProfit : (config.takeProfit ?? 5);
+    let trailingStop = learning?.risk.source === "learned" ? learning.risk.trailingStop : (config.trailingStop ?? -3);
     const maxPerTrade = config.maxPerTrade ?? 1000000;
     const maxDailyTrades = config.maxDailyTrades ?? 5;
-    const takeProfitRatio = config.takeProfitRatio ?? 50;
+    const takeProfitRatio = learning?.risk.source === "learned" ? learning.risk.takeProfitRatio : (config.takeProfitRatio ?? 50);
     const dailyLossLimit = config.dailyLossLimit ?? -3;
+
+    // 학습된 가중치
+    const customWeights = learning?.weights.source === "learned" ? learning.weights : undefined;
 
     const actions: Array<{ type: string; code: string; name?: string; detail: string }> = [];
     let tradeCount = 0;
@@ -351,7 +360,7 @@ async function runEngine(config: EngineConfig) {
       scannedCount++;
       if (candles.length < 26) continue;
 
-      const signal = analyzeSignal(candles);
+      const signal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : analyzeSignal(candles);
       await new Promise((r) => setTimeout(r, 200));
 
       if (signal.strength === "strong" && signal.side === "buy") {
@@ -402,7 +411,7 @@ async function runEngine(config: EngineConfig) {
         scannedCount++;
         if (candles.length < 26) continue;
 
-        const signal = analyzeSignal(candles);
+        const signal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : analyzeSignal(candles);
         await new Promise((r) => setTimeout(r, 200));
 
         if (signal.strength === "strong" && signal.side === "buy") {
@@ -440,6 +449,12 @@ async function runEngine(config: EngineConfig) {
     return NextResponse.json({
       timestamp: new Date().toISOString(),
       tradeCount, scannedCount, durationMs, actions,
+      learning: learning ? {
+        weightsSource: learning.weights.source,
+        riskSource: learning.risk.source,
+        sampleSize: learning.risk.sampleSize,
+        appliedRisk: { stopLoss, takeProfit, trailingStop, takeProfitRatio },
+      } : null,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "엔진 실행 실패";

@@ -288,6 +288,39 @@ export function analyzeSignal(candles: DailyCandle[]): SignalResult {
   return { indicators, totalScore, matchCount, strength, side, comment, raw };
 }
 
+// ─── 학습된 가중치로 신호 분석 ────────────────────
+export function analyzeSignalWithWeights(candles: DailyCandle[], customWeights?: { trending: Record<string, number>; ranging: Record<string, number> }): SignalResult {
+  const result = analyzeSignal(candles);
+  if (!customWeights || candles.length < 26) return result;
+
+  const regime = result.raw.regime;
+  const w = customWeights[regime];
+  if (!w) return result;
+
+  // 커스텀 가중치로 점수 재계산
+  let buyTotal = 0, sellTotal = 0;
+  for (const ind of result.indicators) {
+    const weight = w[ind.name] ?? ind.weight;
+    ind.weight = weight;
+    ind.score = ind.hit ? weight : 0;
+    buyTotal += ind.hit ? weight : 0;
+  }
+  // 매도 점수는 기존 로직 유지 (가중치만 적용)
+  sellTotal = 100 - buyTotal; // 간단 근사
+
+  const totalScore = buyTotal;
+  let strength: "strong" | "weak" | "none" = "none";
+  let side: "buy" | "sell" | "hold" = result.side;
+  const matchCount = result.matchCount;
+
+  if (buyTotal >= 70 || matchCount >= 4) { strength = "strong"; side = "buy"; }
+  else if (buyTotal >= 40 || matchCount >= 2) { strength = "weak"; side = "buy"; }
+  else if (sellTotal >= 70) { strength = "strong"; side = "sell"; }
+  else if (sellTotal >= 40) { strength = "weak"; side = "sell"; }
+
+  return { ...result, totalScore, strength, side };
+}
+
 // ─── ATR 기반 동적 손절/익절 계산 ─────────────────
 export function calcDynamicRisk(atr: number, currentPrice: number) {
   // ATR × 2 = 손절, ATR × 3 = 익절 (비율로 변환)
