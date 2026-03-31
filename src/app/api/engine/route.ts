@@ -193,22 +193,46 @@ async function getBalance(config: EngineConfig) {
   return res.json();
 }
 
-async function sellOrder(config: EngineConfig, code: string, qty: number) {
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
-  const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
-    method: "POST", headers: headers(config, KIS_TR.SELL),
-    body: JSON.stringify({ CANO: cano, ACNT_PRDT_CD: acntPrdtCd, PDNO: code, ORD_DVSN: "01", ORD_QTY: String(qty), ORD_UNPR: "0" }),
-  });
-  return res.json();
+interface OrderResult {
+  success: boolean;
+  msg: string;
+  ordNo?: string;
+  raw?: Record<string, unknown>;
 }
 
-async function buyOrder(config: EngineConfig, code: string, qty: number) {
+async function executeOrder(config: EngineConfig, trId: string, code: string, qty: number, side: "buy" | "sell"): Promise<OrderResult> {
   const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
-  const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
-    method: "POST", headers: headers(config, KIS_TR.BUY),
-    body: JSON.stringify({ CANO: cano, ACNT_PRDT_CD: acntPrdtCd, PDNO: code, ORD_DVSN: "01", ORD_QTY: String(qty), ORD_UNPR: "0" }),
-  });
-  return res.json();
+  try {
+    const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
+      method: "POST", headers: headers(config, trId),
+      body: JSON.stringify({ CANO: cano, ACNT_PRDT_CD: acntPrdtCd, PDNO: code, ORD_DVSN: "01", ORD_QTY: String(qty), ORD_UNPR: "0" }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "응답 없음");
+      return { success: false, msg: `HTTP ${res.status}: ${text.slice(0, 200)}` };
+    }
+
+    const data = await res.json();
+    const rtCd = data.rt_cd;  // "0" = 성공
+    const msg = data.msg1 || data.msg || "응답 없음";
+
+    if (rtCd === "0") {
+      return { success: true, msg, ordNo: data.output?.ODNO, raw: data };
+    }
+    return { success: false, msg: `[${rtCd}] ${msg}`, raw: data };
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : "네트워크 오류";
+    return { success: false, msg: errMsg };
+  }
+}
+
+async function sellOrder(config: EngineConfig, code: string, qty: number): Promise<OrderResult> {
+  return executeOrder(config, KIS_TR.SELL, code, qty, "sell");
+}
+
+async function buyOrder(config: EngineConfig, code: string, qty: number): Promise<OrderResult> {
+  return executeOrder(config, KIS_TR.BUY, code, qty, "buy");
 }
 
 // ─── Cron GET ───────────────────────────────────
@@ -336,17 +360,58 @@ async function runEngine(config: EngineConfig) {
 
         const result = await sellOrder(config, code, sellQty);
         actions.push({
-          type: risk.action, code, name,
-          detail: `${risk.reason} → 매도 ${sellQty}/${qty}주 (${result.msg1 || "주문완료"})`,
+          type: result.success ? risk.action : "sell_failed", code, name,
+          detail: result.success
+            ? `${risk.reason} → 매도 ${sellQty}/${qty}주 (${result.msg})`
+            : `${risk.reason} → 매도 실패: ${result.msg}`,
         });
 
-        if (sellQty >= qty) {
-          await closePosition(code, currentPrice, sellQty, risk.action);
+        if (result.success) {
+          if (sellQty >= qty) {
+            await closePosition(code, currentPrice, sellQty, risk.action);
+          }
+          tradeCount++;
         }
-
-        tradeCount++;
         await new Promise((r) => setTimeout(r, 200));
       }
+    }
+
+    // ═══ STEP 1.5: 승인된 신호 매수 실행 ═══
+    const { data: approvedSignals } = await supabase.from("pending_signals")
+      .select("*").eq("status", "approved");
+
+    for (const sig of approvedSignals || []) {
+      if (tradeCount >= maxDailyTrades) break;
+      if (holdings.some((h: Record<string, string>) => h.pdno === sig.stock_code && Number(h.hldg_qty) > 0)) {
+        await supabase.from("pending_signals").update({ status: "expired", resolved_at: new Date().toISOString() }).eq("id", sig.id);
+        continue;
+      }
+
+      const priceData = await getPrice(config, sig.stock_code);
+      const price = Number(priceData?.stck_prpr) || 0;
+      const name = priceData?.hts_kor_isnm || sig.stock_name || sig.stock_code;
+      if (price <= 0) continue;
+
+      const qty = Math.floor((maxPerTrade * 0.5) / price);
+      if (qty <= 0) continue;
+
+      const result = await buyOrder(config, sig.stock_code, qty);
+      actions.push({
+        type: result.success ? "approved_buy" : "approved_buy_failed",
+        code: sig.stock_code, name,
+        detail: result.success
+          ? `승인 매수 ${qty}주 @ ${price.toLocaleString()}원 (점수: ${sig.signal_score}) (${result.msg})`
+          : `승인 매수 실패: ${result.msg}`,
+      });
+
+      if (result.success) {
+        await openPosition(sig.stock_code, name, price, qty, { strength: "weak", side: "buy", totalScore: sig.signal_score, comment: sig.signal_comment, indicators: [], raw: sig.signal_data || {}, matchCount: 0 } as SignalResult, "initial");
+        tradeCount++;
+      }
+
+      // 처리 완료 → expired로 변경
+      await supabase.from("pending_signals").update({ status: "expired", resolved_at: new Date().toISOString() }).eq("id", sig.id);
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     // ═══ STEP 2: 관심종목 신호 분석 (매수) ═══
@@ -378,22 +443,40 @@ async function runEngine(config: EngineConfig) {
         const result = await buyOrder(config, code, qty);
         const phase = existingPos ? "full" : "initial";
         actions.push({
-          type: phase === "initial" ? "split_buy_1" : "split_buy_2", code, name,
-          detail: `${signal.totalScore}점 (${signal.raw.regime}) → ${phase === "initial" ? "1차" : "2차"} 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg1 || "주문완료"})`,
+          type: result.success ? (phase === "initial" ? "split_buy_1" : "split_buy_2") : "buy_failed",
+          code, name,
+          detail: result.success
+            ? `${signal.totalScore}점 (${signal.raw.regime}) → ${phase === "initial" ? "1차" : "2차"} 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg})`
+            : `${signal.totalScore}점 → 매수 실패: ${result.msg}`,
         });
 
-        if (!existingPos) {
-          await openPosition(code, name, price, qty, signal, "initial");
+        if (result.success) {
+          if (!existingPos) {
+            await openPosition(code, name, price, qty, signal, "initial");
+          }
+          tradeCount++;
         }
-
-        tradeCount++;
         await new Promise((r) => setTimeout(r, 200));
 
       } else if (signal.strength === "weak" && signal.side === "buy") {
+        // DB에 승인 대기 신호 저장
+        const priceData = await getPrice(config, code);
+        const name = priceData?.hts_kor_isnm || code;
+        try {
+          await supabase.from("pending_signals").insert({
+            stock_code: code, stock_name: name,
+            signal_score: signal.totalScore,
+            signal_comment: signal.comment,
+            signal_data: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount },
+            source: "watchlist", status: "pending",
+          });
+        } catch { /* ignore */ }
+
         actions.push({
-          type: "pending_approval", code,
-          detail: `약한 신호 ${signal.totalScore}점 → 승인 대기. ${signal.comment}`,
+          type: "pending_approval", code, name,
+          detail: `약한 신호 ${signal.totalScore}점 → DB 저장, 승인 대기. ${signal.comment}`,
         });
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
 
@@ -426,19 +509,37 @@ async function runEngine(config: EngineConfig) {
 
           const result = await buyOrder(config, code, qty);
           actions.push({
-            type: "surge_buy", code, name,
-            detail: `급등주 ${signal.totalScore}점 (${signal.raw.regime}) → 1차 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg1 || "주문완료"})`,
+            type: result.success ? "surge_buy" : "surge_buy_failed", code, name,
+            detail: result.success
+              ? `급등주 ${signal.totalScore}점 (${signal.raw.regime}) → 1차 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg})`
+              : `급등주 ${signal.totalScore}점 → 매수 실패: ${result.msg}`,
           });
 
-          await openPosition(code, name, price, qty, signal, "initial");
-          tradeCount++;
+          if (result.success) {
+            await openPosition(code, name, price, qty, signal, "initial");
+            tradeCount++;
+          }
           await new Promise((r) => setTimeout(r, 200));
 
         } else if (signal.strength === "weak" && signal.side === "buy") {
+          // DB에 승인 대기 신호 저장
+          const priceData2 = await getPrice(config, code);
+          const surgeName = priceData2?.hts_kor_isnm || code;
+          try {
+            await supabase.from("pending_signals").insert({
+              stock_code: code, stock_name: surgeName,
+              signal_score: signal.totalScore,
+              signal_comment: signal.comment,
+              signal_data: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount },
+              source: "surge", status: "pending",
+            });
+          } catch { /* ignore */ }
+
           actions.push({
-            type: "surge_pending", code,
-            detail: `급등주 약한 ${signal.totalScore}점 → 승인 대기. ${signal.comment}`,
+            type: "surge_pending", code, name: surgeName,
+            detail: `급등주 약한 ${signal.totalScore}점 → DB 저장, 승인 대기. ${signal.comment}`,
           });
+          await new Promise((r) => setTimeout(r, 200));
         }
       }
     }
