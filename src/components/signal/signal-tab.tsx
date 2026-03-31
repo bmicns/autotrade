@@ -88,8 +88,8 @@ export function SignalTab() {
       if (res.ok && action === "approved") {
         const signal = signals.find((s) => s.id === id);
         if (signal && kisConfig.token) {
-          // 승인된 신호 → 즉시 매수 실행
-          await fetch("/api/kis/order", {
+          // 승인된 신호 → 즉시 시장가 매수 실행
+          const orderRes = await fetch("/api/kis/order", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -97,11 +97,17 @@ export function SignalTab() {
               appSecret: kisConfig.appSecret,
               accountNo: kisConfig.accountNo,
               token: kisConfig.token,
-              code: signal.stock_code,
+              stockCode: signal.stock_code,
               side: "buy",
-              orderType: "market",
+              quantity: 1,     // 최소 1주 즉시 매수 (엔진이 다음 사이클에서 추가매수 판단)
+              price: 0,
+              orderType: "01", // 시장가
             }),
           });
+          const orderData = await orderRes.json();
+          if (orderData.rt_cd !== "0") {
+            alert(`매수 실패: ${orderData.msg1 || orderData.error || "알 수 없는 오류"}`);
+          }
         }
       }
       fetchSignals();
