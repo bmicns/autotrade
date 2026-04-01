@@ -75,6 +75,7 @@ interface AppState {
   // 계좌 정보
   totalEval: number;
   totalPnl: number;
+  totalPnlRate: number;
   cashBalance: number;
 
   // 매매 이력
@@ -140,6 +141,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   prices: new Map(),
   totalEval: 0,
   totalPnl: 0,
+  totalPnlRate: 0,
   cashBalance: 0,
 
   trades: [],
@@ -257,6 +259,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           holdings,
           totalEval: balance.totalEval || balance.cashBalance,
           totalPnl: balance.totalPnl,
+          totalPnlRate: balance.totalPnlRate,
           cashBalance: balance.cashBalance,
           kisConnected: true,
         });

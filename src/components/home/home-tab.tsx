@@ -69,7 +69,8 @@ export function HomeTab() {
         return p.price > 0 ? sum + (p.price - h.avgPrice) * h.quantity : sum;
       }, 0);
 
-  const pct = totalKRW > 0 && totalPnl !== 0 ? (totalPnl / (totalKRW - totalPnl)) * 100 : 0;
+  const storePnlRate = useAppStore((s) => s.totalPnlRate);
+  const pct = storePnlRate !== 0 ? storePnlRate : (totalKRW > 0 && totalPnl !== 0 ? (totalPnl / (totalKRW - totalPnl)) * 100 : 0);
   const isUp = totalPnl >= 0;
 
   return (
