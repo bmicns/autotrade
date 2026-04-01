@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { COLORS } from "@/lib/constants";
 import { Icon } from "@/components/ui/icons";
+import { BacktestSection } from "@/components/stats/backtest-section";
 import type { PerformanceStats } from "@/lib/analytics";
 
 type Period = "1w" | "1m" | "3m" | "all";
@@ -294,6 +295,7 @@ export function StatsTab() {
           )}
         </div>
       )}
+      <BacktestSection />
     </div>
   );
 }

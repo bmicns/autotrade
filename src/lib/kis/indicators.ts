@@ -1,6 +1,8 @@
-// NEXIO 기술지표 분석 엔진 v2
-// 6개 지표: RSI, MACD, 이동평균, 볼린저밴드, 거래량, ADX
-// 가중치 점수제 + 시장 레짐 감지
+// NEXIO 기술지표 분석 엔진 v3
+// 7개 지표: RSI, MACD, 이동평균, 볼린저밴드, 거래량, ADX + 캔들패턴
+// 가중치 점수제 + 시장 레짐 감지 + 캔들 패턴 분석
+
+import { detectPatterns, patternBuyScore } from "@/lib/candle-patterns";
 
 export interface DailyCandle {
   date: string;
@@ -214,17 +216,22 @@ export function analyzeSignal(candles: DailyCandle[]): SignalResult {
   // 시장 레짐 감지: ADX > 25 = 추세장, ≤ 25 = 횡보장
   const regime: "trending" | "ranging" = adx > 25 ? "trending" : "ranging";
 
-  // ── #4 가중치: 레짐에 따라 차등 ──
-  // 추세장: MACD(30) + MA(25) 비중 ↑ / 횡보장: RSI(25) + 볼린저(25) 비중 ↑
+  // ── #4 가중치: 레짐에 따라 차등 + 캔들 패턴 ──
+  // 기술지표 85점 + 캔들패턴 15점 = 100점
   const weights = regime === "trending"
-    ? { rsi: 10, macd: 30, ma: 25, bb: 10, vol: 25 }
-    : { rsi: 25, macd: 15, ma: 15, bb: 25, vol: 20 };
+    ? { rsi: 8, macd: 26, ma: 22, bb: 8, vol: 21, pattern: 15 }
+    : { rsi: 21, macd: 13, ma: 13, bb: 21, vol: 17, pattern: 15 };
 
   // 매수/매도 판정
   const rsiBuy = rsi < 30, rsiSell = rsi > 70;
   const macdBuy = macd.crossover === "golden", macdSell = macd.crossover === "dead";
   const maBuy = ma.crossUp || ma.above, maSell = !ma.above;
   const bbBuy = bb.position === "below", bbSell = bb.position === "above";
+
+  // 캔들 패턴 감지
+  const patterns = detectPatterns(candles);
+  const patternBuyHit = patternBuyScore(patterns) > 0;
+  const patternDesc = patterns.length > 0 ? patterns.map((p) => p.nameKo).join(", ") : "패턴 없음";
 
   // 점수 계산 (hit이면 해당 가중치 점수 부여)
   const buyScores = [
@@ -233,13 +240,16 @@ export function analyzeSignal(candles: DailyCandle[]): SignalResult {
     { hit: maBuy, w: weights.ma },
     { hit: bbBuy, w: weights.bb },
     { hit: vol.spike, w: weights.vol },
+    { hit: patternBuyHit, w: weights.pattern },
   ];
+  const patternSellHit = patterns.some((p) => p.type === "bearish");
   const sellScores = [
     { hit: rsiSell, w: weights.rsi },
     { hit: macdSell, w: weights.macd },
     { hit: maSell, w: weights.ma },
     { hit: bbSell, w: weights.bb },
     { hit: vol.spike, w: weights.vol },
+    { hit: patternSellHit, w: weights.pattern },
   ];
 
   const buyTotal = buyScores.reduce((s, x) => s + (x.hit ? x.w : 0), 0);
@@ -253,6 +263,7 @@ export function analyzeSignal(candles: DailyCandle[]): SignalResult {
     { name: "이동평균", value: ma.above ? "5일>20일" : "5일<20일", desc: ma.crossUp ? "돌파 확인" : ma.above ? "상승 추세" : "하락 추세", hit: maBuy, score: maBuy ? weights.ma : 0, weight: weights.ma },
     { name: "볼린저", value: bb.position === "below" ? "하단 이탈" : bb.position === "above" ? "상단 돌파" : "밴드 내", desc: bb.position === "below" ? "반등 가능성" : bb.position === "above" ? "과열 주의" : "중립", hit: bbBuy, score: bbBuy ? weights.bb : 0, weight: weights.bb },
     { name: "거래량", value: `${Math.round(vol.ratio)}%`, desc: "20일 평균 대비", hit: vol.spike, score: vol.spike ? weights.vol : 0, weight: weights.vol },
+    { name: "캔들패턴", value: patternDesc, desc: patterns.length > 0 ? `${patterns.length}개 감지` : "감지된 패턴 없음", hit: patternBuyHit, score: patternBuyHit ? weights.pattern : 0, weight: weights.pattern },
   ];
 
   // 가중 점수 기반 판단 (기존 다수결도 병행)
@@ -275,9 +286,9 @@ export function analyzeSignal(candles: DailyCandle[]): SignalResult {
   }
 
   const comment = side === "buy"
-    ? `매수 신호 ${matchCount}/5 (${totalScore}점, ${regime === "trending" ? "추세장" : "횡보장"}). ${rsiBuy ? "RSI 과매도. " : ""}${macdBuy ? "MACD 골든크로스. " : ""}${vol.spike ? "거래량 급증." : ""}`
+    ? `매수 신호 ${matchCount}/6 (${totalScore}점, ${regime === "trending" ? "추세장" : "횡보장"}). ${rsiBuy ? "RSI 과매도. " : ""}${macdBuy ? "MACD 골든크로스. " : ""}${patternBuyHit ? patternDesc + ". " : ""}${vol.spike ? "거래량 급증." : ""}`
     : side === "sell"
-    ? `매도 신호 ${matchCount}/5 (${totalScore}점). ${rsiSell ? "RSI 과매수. " : ""}${macdSell ? "MACD 데드크로스. " : ""}`
+    ? `매도 신호 ${matchCount}/6 (${totalScore}점). ${rsiSell ? "RSI 과매수. " : ""}${macdSell ? "MACD 데드크로스. " : ""}${patternSellHit ? patternDesc + ". " : ""}`
     : `대기 (${regime === "trending" ? "추세장" : "횡보장"}, ADX ${adx.toFixed(0)}).`;
 
   const raw: SignalRaw = {
