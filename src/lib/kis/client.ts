@@ -104,12 +104,20 @@ export async function fetchBalance(config: KISConfig): Promise<BalanceResult | n
       pnlRate: Number(item.evlu_pfls_rt) || 0,
     })).filter((h: BalanceItem) => h.quantity > 0);
 
+    const cash = Number(output2.dnca_tot_amt) || 0;
+    const purchaseTotal = Number(output2.pchs_amt_smtl_amt) || 0;
+    const evalTotal = Number(output2.evlu_amt_smtl_amt) || 0;
+    const pnlTotal = Number(output2.evlu_pfls_smtl_amt) || 0;
+
+    // 순자산 = (예수금 - 총매입금) + 총평가금
+    const netAsset = (cash - purchaseTotal) + evalTotal;
+
     return {
       holdings,
-      totalEval: Number(output2.tot_evlu_amt) || 0,
-      totalPnl: Number(output2.evlu_pfls_smtl_amt) || 0,
-      totalPnlRate: Number(output2.tot_evlu_pfls_amt) ? (Number(output2.evlu_pfls_smtl_amt) / Number(output2.pchs_amt_smtl_amt) * 100) : 0,
-      cashBalance: Number(output2.dnca_tot_amt) || 0,
+      totalEval: netAsset,
+      totalPnl: pnlTotal,
+      totalPnlRate: purchaseTotal > 0 ? (pnlTotal / purchaseTotal) * 100 : 0,
+      cashBalance: cash,
     };
   } catch {
     return null;
