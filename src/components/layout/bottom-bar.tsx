@@ -6,7 +6,7 @@ import { Icon } from "@/components/ui/icons";
 
 const TABS = [
   { id: "home" as const, icon: "home" as const, label: "홈" },
-  { id: "signal" as const, icon: "signal" as const, label: "신호승인", badge: 2 },
+  { id: "signal" as const, icon: "signal" as const, label: "신호승인" },
   { id: "portfolio" as const, icon: "pie" as const, label: "포트폴리오" },
   { id: "stats" as const, icon: "bar" as const, label: "통계" },
   { id: "strategy" as const, icon: "star" as const, label: "전략" },
@@ -14,7 +14,7 @@ const TABS = [
 ];
 
 export function BottomBar() {
-  const { tab, setTab } = useAppStore();
+  const { tab, setTab, pendingCount } = useAppStore();
 
   return (
     <div
@@ -36,9 +36,9 @@ export function BottomBar() {
             >
               {t.label}
             </span>
-            {t.badge && (
+            {t.id === "signal" && pendingCount > 0 && (
               <span className="absolute right-1 top-0 flex h-[15px] w-[15px] items-center justify-center rounded-full text-[9px] font-bold text-white" style={{ background: COLORS.rise }}>
-                {t.badge}
+                {pendingCount}
               </span>
             )}
           </button>

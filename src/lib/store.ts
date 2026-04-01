@@ -94,6 +94,10 @@ interface AppState {
   kisConnected: boolean;
   fetchKISData: () => Promise<void>;
 
+  // 대기 신호 뱃지
+  pendingCount: number;
+  fetchPendingCount: () => Promise<void>;
+
   hydrate: () => void;
 }
 
@@ -176,6 +180,17 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   kisLoading: false,
   kisConnected: false,
+
+  pendingCount: 0,
+  fetchPendingCount: async () => {
+    try {
+      const res = await fetch("/api/pending-signals");
+      if (res.ok) {
+        const data = await res.json();
+        set({ pendingCount: Array.isArray(data) ? data.length : 0 });
+      }
+    } catch { /* ignore */ }
+  },
 
   fetchKISData: async () => {
     const { kisConfig, setKISConfig } = get();
@@ -286,5 +301,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (kisConfig.appKey && kisConfig.appSecret && kisConfig.accountNo) {
       get().fetchKISData();
     }
+
+    // 대기 신호 뱃지 로드
+    get().fetchPendingCount();
   },
 }));

@@ -111,6 +111,7 @@ export function SignalTab() {
         }
       }
       fetchSignals();
+      useAppStore.getState().fetchPendingCount();
     } catch { /* ignore */ }
     setActionLoading(null);
   };
