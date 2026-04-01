@@ -12,7 +12,6 @@ export function BacktestSection() {
   const [stopLoss, setStopLoss] = useState(-5);
   const [takeProfit, setTakeProfit] = useState(5);
   const [trailingStop, setTrailingStop] = useState(-3);
-  const [useCandlePatterns, setUseCandlePatterns] = useState(true);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +40,6 @@ export function BacktestSection() {
           stockName: item?.name ?? selectedCode,
           stopLoss, takeProfit, trailingStop,
           maxPerTrade: 1000000,
-          useCandlePatterns,
         }),
       });
       if (!res.ok) {
@@ -93,10 +91,6 @@ export function BacktestSection() {
           <input type="number" value={trailingStop} onChange={(e) => setTrailingStop(Number(e.target.value))}
             style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.line}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink }} />
         </div>
-        <label style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: COLORS.ink, cursor: "pointer" }}>
-          <input type="checkbox" checked={useCandlePatterns} onChange={(e) => setUseCandlePatterns(e.target.checked)} />
-          캔들 패턴
-        </label>
         <button
           onClick={runTest}
           disabled={loading || !selectedCode}

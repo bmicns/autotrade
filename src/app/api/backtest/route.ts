@@ -25,7 +25,6 @@ export async function POST(req: NextRequest) {
       takeProfit = 5,
       trailingStop = -3,
       maxPerTrade = 1000000,
-      useCandlePatterns = true,
     } = body;
 
     if (!stockCode) {
@@ -59,7 +58,6 @@ export async function POST(req: NextRequest) {
       takeProfit,
       trailingStop,
       maxPerTrade,
-      useCandlePatterns,
     });
 
     return NextResponse.json(result);

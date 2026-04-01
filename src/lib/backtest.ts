@@ -3,8 +3,7 @@
  * 과거 캔들 데이터로 현재 전략을 시뮬레이션하여 성과 측정
  */
 
-import { analyzeSignal, checkRisk, type DailyCandle, type SignalResult } from "@/lib/kis/indicators";
-import { detectPatterns, type CandlePattern } from "@/lib/candle-patterns";
+import { analyzeSignal, checkRisk, type DailyCandle } from "@/lib/kis/indicators";
 
 // ─── 타입 ──────────────────────────────────────
 
@@ -17,7 +16,6 @@ export interface BacktestConfig {
   takeProfit: number;     // % (예: 5)
   trailingStop: number;   // % (예: -3)
   maxPerTrade: number;    // 최대 매수 금액
-  useCandlePatterns: boolean;
 }
 
 export interface BacktestTrade {
@@ -60,7 +58,7 @@ export interface BacktestResult {
 export function runBacktest(config: BacktestConfig): BacktestResult {
   const {
     stockCode, stockName = stockCode, candles, initialCash,
-    stopLoss, takeProfit, trailingStop, maxPerTrade, useCandlePatterns,
+    stopLoss, takeProfit, trailingStop, maxPerTrade,
   } = config;
 
   const trades: BacktestTrade[] = [];
@@ -84,16 +82,11 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     const today = candles[i];
     const window = candles.slice(0, i + 1);
 
-    // 캔들 패턴 감지
-    const patterns: CandlePattern[] = useCandlePatterns ? detectPatterns(window) : [];
-    const patternNames = patterns.map((p) => p.nameKo);
-    const patternScore = patterns.reduce((s, p) => s + p.score, 0);
-
-    // 기술 지표 분석
-    const signal: SignalResult = analyzeSignal(window);
-
-    // 캔들 패턴 점수를 신호에 보너스로 적용
-    const adjustedScore = signal.totalScore + (useCandlePatterns ? Math.round(patternScore * 0.15) : 0);
+    // 기술 지표 분석 (캔들 패턴은 analyzeSignal 내부에서 처리)
+    const signal = analyzeSignal(window);
+    const patternIndicator = signal.indicators.find((ind) => ind.name === "캔들패턴");
+    const patternNames = patternIndicator && patternIndicator.value !== "패턴 없음"
+      ? patternIndicator.value.split(", ") : [];
 
     // ── 보유 중: 리스크 체크 ──
     if (position) {
@@ -109,7 +102,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
       );
 
       // 매도 신호 체크
-      const sellSignal = signal.side === "sell" || adjustedScore < -20;
+      const sellSignal = signal.side === "sell";
 
       if (risk.action !== "hold" || sellSignal) {
         const exitReason = risk.action !== "hold" ? risk.reason : "signal_sell";
@@ -147,9 +140,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
 
     // ── 미보유: 매수 신호 체크 ──
     if (!position) {
-      const buyCondition = useCandlePatterns
-        ? (adjustedScore >= 40 && signal.side === "buy") || (patternScore >= 10 && signal.totalScore >= 30)
-        : signal.strength !== "none" && signal.side === "buy";
+      const buyCondition = signal.strength !== "none" && signal.side === "buy";
 
       if (buyCondition && today.close > 0) {
         const investAmount = Math.min(cash, maxPerTrade);
@@ -274,7 +265,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     winCount: wins.length,
     lossCount: losses.length,
     winRate: trades.length > 0 ? Math.round((wins.length / trades.length) * 100) : 0,
-    profitFactor: grossLoss > 0 ? Math.round((grossProfit / grossLoss) * 100) / 100 : grossProfit > 0 ? Infinity : 0,
+    profitFactor: grossLoss > 0 ? Math.round((grossProfit / grossLoss) * 100) / 100 : grossProfit > 0 ? 999 : 0,
     maxDrawdown: Math.round(maxDrawdown * 100) / 100,
     sharpeRatio: Math.round(sharpeRatio * 100) / 100,
     avgHoldDays: trades.length > 0 ? Math.round(trades.reduce((s, t) => s + t.holdDays, 0) / trades.length) : 0,

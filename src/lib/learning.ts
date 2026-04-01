@@ -10,11 +10,11 @@ const supabase = createClient(
 
 // ─── 기본 가중치 (레짐별) ────────────────────────
 const BASE_WEIGHTS = {
-  trending: { RSI: 10, MACD: 30, 이동평균: 25, 볼린저: 10, 거래량: 25 },
-  ranging:  { RSI: 25, MACD: 15, 이동평균: 15, 볼린저: 25, 거래량: 20 },
+  trending: { RSI: 8, MACD: 26, 이동평균: 22, 볼린저: 8, 거래량: 21, 캔들패턴: 15 },
+  ranging:  { RSI: 21, MACD: 13, 이동평균: 13, 볼린저: 21, 거래량: 17, 캔들패턴: 15 },
 };
 
-const INDICATOR_NAMES = ["RSI", "MACD", "이동평균", "볼린저", "거래량"] as const;
+const INDICATOR_NAMES = ["RSI", "MACD", "이동평균", "볼린저", "거래량", "캔들패턴"] as const;
 
 export interface LearnedWeights {
   trending: Record<string, number>;
