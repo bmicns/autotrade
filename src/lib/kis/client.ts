@@ -109,8 +109,8 @@ export async function fetchBalance(config: KISConfig): Promise<BalanceResult | n
     const evalTotal = Number(output2.evlu_amt_smtl_amt) || 0;
     const pnlTotal = Number(output2.evlu_pfls_smtl_amt) || 0;
 
-    // 순자산 = (예수금 - 총매입금) + 총평가금
-    const netAsset = (cash - purchaseTotal) + evalTotal;
+    // 총자산 = 예수금(가용현금) + 총평가금(보유주식 시가)
+    const netAsset = cash + evalTotal;
 
     return {
       holdings,
