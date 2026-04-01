@@ -208,13 +208,13 @@ export function SignalTab() {
       {tab === "watchlist" && (
         <div>
           {/* 종목 추가 폼 */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
             <input
               value={newCode}
               onChange={(e) => setNewCode(e.target.value)}
               placeholder="종목코드 (예: 005930)"
               style={{
-                flex: 1, padding: "10px 12px", fontSize: 14, border: `1px solid ${COLORS.line}`,
+                minWidth: 120, flex: "1 1 140px", padding: "10px 12px", fontSize: 14, border: `1px solid ${COLORS.line}`,
                 borderRadius: 8, background: COLORS.bg, color: COLORS.ink, outline: "none",
               }}
             />
@@ -223,7 +223,7 @@ export function SignalTab() {
               onChange={(e) => setNewName(e.target.value)}
               placeholder="종목명 (선택)"
               style={{
-                flex: 1, padding: "10px 12px", fontSize: 14, border: `1px solid ${COLORS.line}`,
+                minWidth: 120, flex: "1 1 140px", padding: "10px 12px", fontSize: 14, border: `1px solid ${COLORS.line}`,
                 borderRadius: 8, background: COLORS.bg, color: COLORS.ink, outline: "none",
               }}
             />
@@ -231,7 +231,7 @@ export function SignalTab() {
               onClick={addToWatchlist}
               disabled={loading || !newCode.trim()}
               style={{
-                padding: "10px 16px", fontSize: 14, fontWeight: 700, border: "none", borderRadius: 8,
+                flex: "0 0 auto", padding: "10px 20px", fontSize: 14, fontWeight: 700, border: "none", borderRadius: 8,
                 background: COLORS.hero, color: "#FFF", cursor: "pointer", whiteSpace: "nowrap",
                 opacity: loading || !newCode.trim() ? 0.5 : 1,
               }}
