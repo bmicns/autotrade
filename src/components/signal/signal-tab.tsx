@@ -28,8 +28,9 @@ export function SignalTab() {
   const [tab, setTab] = useState<"signals" | "watchlist">("signals");
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [signals, setSignals] = useState<PendingSignal[]>([]);
-  const [newCode, setNewCode] = useState("");
-  const [newName, setNewName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{ code: string; name: string; market: string }[]>([]);
+  const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -52,17 +53,30 @@ export function SignalTab() {
     fetchSignals();
   }, [fetchWatchlist, fetchSignals]);
 
-  const addToWatchlist = async () => {
-    if (!newCode.trim()) return;
+  // 종목 검색 디바운스
+  useEffect(() => {
+    if (searchQuery.length < 1) { setSearchResults([]); return; }
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch(`/api/stock-search?q=${encodeURIComponent(searchQuery)}`);
+        if (res.ok) setSearchResults(await res.json());
+      } catch { /* ignore */ }
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const addToWatchlist = async (code: string, name: string) => {
     setLoading(true);
     try {
       await fetch("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: newCode.trim(), name: newName.trim() || null }),
+        body: JSON.stringify({ code, name }),
       });
-      setNewCode("");
-      setNewName("");
+      setSearchQuery("");
+      setSearchResults([]);
       fetchWatchlist();
     } catch { /* ignore */ }
     setLoading(false);
@@ -207,37 +221,51 @@ export function SignalTab() {
 
       {tab === "watchlist" && (
         <div>
-          {/* 종목 추가 폼 */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+          {/* 종목 검색 */}
+          <div style={{ position: "relative", marginBottom: 16 }}>
             <input
-              value={newCode}
-              onChange={(e) => setNewCode(e.target.value)}
-              placeholder="종목코드 (예: 005930)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="종목명 또는 종목코드 검색 (예: 삼성전자, 005930)"
               style={{
-                minWidth: 120, flex: "1 1 140px", padding: "10px 12px", fontSize: 14, border: `1px solid ${COLORS.line}`,
+                width: "100%", padding: "12px 14px", fontSize: 14, border: `1px solid ${COLORS.line}`,
                 borderRadius: 8, background: COLORS.bg, color: COLORS.ink, outline: "none",
+                boxSizing: "border-box",
               }}
             />
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="종목명 (선택)"
-              style={{
-                minWidth: 120, flex: "1 1 140px", padding: "10px 12px", fontSize: 14, border: `1px solid ${COLORS.line}`,
-                borderRadius: 8, background: COLORS.bg, color: COLORS.ink, outline: "none",
-              }}
-            />
-            <button
-              onClick={addToWatchlist}
-              disabled={loading || !newCode.trim()}
-              style={{
-                flex: "0 0 auto", padding: "10px 20px", fontSize: 14, fontWeight: 700, border: "none", borderRadius: 8,
-                background: COLORS.hero, color: "#FFF", cursor: "pointer", whiteSpace: "nowrap",
-                opacity: loading || !newCode.trim() ? 0.5 : 1,
-              }}
-            >
-              {loading ? "..." : "추가"}
-            </button>
+            {searching && (
+              <div style={{ position: "absolute", right: 12, top: 13, fontSize: 12, color: COLORS.dim }}>검색 중...</div>
+            )}
+            {searchResults.length > 0 && (
+              <div style={{
+                position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50, marginTop: 4,
+                background: "#FFF", border: `1px solid ${COLORS.line}`, borderRadius: 8,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 240, overflowY: "auto",
+              }}>
+                {searchResults.map((s) => (
+                  <button
+                    key={s.code}
+                    onClick={() => addToWatchlist(s.code, s.name)}
+                    disabled={loading || watchlist.some((w) => w.code === s.code)}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      width: "100%", padding: "10px 14px", border: "none", borderBottom: `1px solid ${COLORS.line}`,
+                      background: watchlist.some((w) => w.code === s.code) ? "#f5f5f7" : "transparent",
+                      cursor: watchlist.some((w) => w.code === s.code) ? "default" : "pointer",
+                      textAlign: "left", fontSize: 14, color: COLORS.ink,
+                    }}
+                  >
+                    <div>
+                      <span style={{ fontWeight: 600 }}>{s.name}</span>
+                      <span style={{ marginLeft: 8, fontSize: 12, color: COLORS.dim }}>{s.code}</span>
+                    </div>
+                    <span style={{ fontSize: 11, color: COLORS.dim, flexShrink: 0 }}>
+                      {watchlist.some((w) => w.code === s.code) ? "등록됨" : s.market}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 관심종목 리스트 */}
