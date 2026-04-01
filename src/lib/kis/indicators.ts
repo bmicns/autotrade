@@ -308,28 +308,46 @@ export function analyzeSignalWithWeights(candles: DailyCandle[], customWeights?:
   const w = customWeights[regime];
   if (!w) return result;
 
-  // 커스텀 가중치로 점수 재계산
+  // 커스텀 가중치로 매수/매도 점수 독립 재계산
+  // indicators 배열의 hit은 매수 기준이므로, 매도는 원본 raw 데이터로 판정
+  const raw = result.raw;
+  const sellConditions: Record<string, boolean> = {
+    RSI: raw.rsi > 70,
+    MACD: raw.macdCrossover === "dead",
+    이동평균: raw.ma5 < raw.ma20,
+    볼린저: raw.bbPosition === "above",
+    거래량: raw.volumeRatio >= 200,
+    캔들패턴: result.indicators.find((i) => i.name === "캔들패턴")?.value.includes("하락") ?? false,
+  };
+
   let buyTotal = 0, sellTotal = 0;
+  let buyCount = 0, sellCount = 0;
   for (const ind of result.indicators) {
     const weight = w[ind.name] ?? ind.weight;
     ind.weight = weight;
     ind.score = ind.hit ? weight : 0;
-    buyTotal += ind.hit ? weight : 0;
+    if (ind.hit) { buyTotal += weight; buyCount++; }
+    if (sellConditions[ind.name]) { sellTotal += weight; sellCount++; }
   }
-  // 매도 점수는 기존 로직 유지 (가중치만 적용)
-  sellTotal = 100 - buyTotal; // 간단 근사
 
-  const totalScore = buyTotal;
+  let totalScore: number;
   let strength: "strong" | "weak" | "none" = "none";
-  let side: "buy" | "sell" | "hold" = result.side;
-  const matchCount = result.matchCount;
+  let side: "buy" | "sell" | "hold" = "hold";
+  let matchCount: number;
 
-  if (buyTotal >= 70 || matchCount >= 4) { strength = "strong"; side = "buy"; }
-  else if (buyTotal >= 40 || matchCount >= 2) { strength = "weak"; side = "buy"; }
-  else if (sellTotal >= 70) { strength = "strong"; side = "sell"; }
-  else if (sellTotal >= 40) { strength = "weak"; side = "sell"; }
+  if (buyTotal >= sellTotal) {
+    totalScore = buyTotal;
+    matchCount = buyCount;
+    if (buyTotal >= 70 || buyCount >= 4) { strength = "strong"; side = "buy"; }
+    else if (buyTotal >= 40 || buyCount >= 2) { strength = "weak"; side = "buy"; }
+  } else {
+    totalScore = sellTotal;
+    matchCount = sellCount;
+    if (sellTotal >= 70 || sellCount >= 4) { strength = "strong"; side = "sell"; }
+    else if (sellTotal >= 40 || sellCount >= 2) { strength = "weak"; side = "sell"; }
+  }
 
-  return { ...result, totalScore, strength, side };
+  return { ...result, totalScore, matchCount, strength, side };
 }
 
 // ─── ATR 기반 동적 손절/익절 계산 ─────────────────
