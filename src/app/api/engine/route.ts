@@ -253,7 +253,7 @@ export async function GET(req: NextRequest) {
   const kstHour = new Date(Date.now() + 9 * 3600000).getUTCHours();
   const kstMin = new Date(Date.now() + 9 * 3600000).getUTCMinutes();
   const kstTime = kstHour * 100 + kstMin;
-  const inSession = (kstTime >= 900 && kstTime <= 1150) || (kstTime >= 1250 && kstTime <= 1510);
+  const inSession = (kstTime >= 930 && kstTime <= 1150) || (kstTime >= 1250 && kstTime <= 1510);
   if (!inSession) {
     // skip도 기록하여 cron 실행 여부 추적
     await logEngineRun(0, [{ type: "skipped", code: "", detail: `장 외 시간 (KST ${kstHour}:${String(kstMin).padStart(2, "0")})` }], 0, 0);
