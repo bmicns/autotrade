@@ -102,25 +102,38 @@ export function SignalTab() {
       if (res.ok && action === "approved") {
         const signal = signals.find((s) => s.id === id);
         if (signal && kisConfig.token) {
-          // 승인된 신호 → 즉시 시장가 매수 실행
-          const orderRes = await fetch("/api/kis/order", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              appKey: kisConfig.appKey,
-              appSecret: kisConfig.appSecret,
-              accountNo: kisConfig.accountNo,
-              token: kisConfig.token,
-              stockCode: signal.stock_code,
-              side: "buy",
-              quantity: 1,     // 최소 1주 즉시 매수 (엔진이 다음 사이클에서 추가매수 판단)
-              price: 0,
-              orderType: "01", // 시장가
-            }),
-          });
-          const orderData = await orderRes.json();
-          if (orderData.rt_cd !== "0") {
-            alert(`매수 실패: ${orderData.msg1 || orderData.error || "알 수 없는 오류"}`);
+          // 승인된 신호 → 즉시 시장가 매수 시도
+          try {
+            const orderRes = await fetch("/api/kis/order", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                appKey: kisConfig.appKey,
+                appSecret: kisConfig.appSecret,
+                accountNo: kisConfig.accountNo,
+                token: kisConfig.token,
+                stockCode: signal.stock_code,
+                side: "buy",
+                quantity: 1,
+                price: 0,
+                orderType: "01",
+              }),
+            });
+            const orderData = await orderRes.json();
+            if (orderRes.ok && orderData.rt_cd === "0") {
+              // 매수 성공 → expired 처리
+              await fetch("/api/pending-signals", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, status: "expired" }),
+              });
+            } else {
+              // 매수 실패 → approved 유지, 엔진이 다음 사이클에서 재시도
+              alert(`즉시매수 실패 (엔진이 재시도합니다): ${orderData.msg1 || orderData.error || "알 수 없는 오류"}`);
+            }
+          } catch {
+            // 네트워크 에러 → approved 유지, 엔진 재시도 대기
+            alert("즉시매수 요청 실패 — 엔진이 다음 사이클에서 재시도합니다.");
           }
         }
       }
