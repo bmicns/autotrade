@@ -1,5 +1,6 @@
 {
   "crons": [
+    { "path": "/api/observer", "schedule": "0 0 * * 1-5" },
     { "path": "/api/engine", "schedule": "30 0 * * 1-5" }
   ]
 }

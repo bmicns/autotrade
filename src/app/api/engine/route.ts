@@ -416,6 +416,25 @@ async function runEngine(config: EngineConfig) {
       await new Promise((r) => setTimeout(r, 200));
     }
 
+    // ═══ 장 초반 흐름 보너스 (09:00 스냅샷 기반) ═══
+    const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+    const { data: snapshots } = await supabase.from("market_snapshots").select("*").eq("date", today);
+    const snapshotMap = new Map<string, { open_price: number; snapshot_price: number; snapshot_volume: number }>();
+    for (const s of snapshots || []) {
+      snapshotMap.set(s.stock_code, { open_price: Number(s.open_price), snapshot_price: Number(s.snapshot_price), snapshot_volume: Number(s.snapshot_volume) });
+    }
+
+    function getOpeningBonus(code: string): number {
+      const snap = snapshotMap.get(code);
+      if (!snap || snap.open_price <= 0) return 0;
+      const gap = (snap.snapshot_price - snap.open_price) / snap.open_price;
+      if (gap > 0.01 && snap.snapshot_volume > 50000) return 15;  // +1% 이상 & 거래량 동반 → 강한 가산
+      if (gap > 0.005) return 8;   // +0.5% 완만 상승
+      if (gap < -0.02) return -20; // -2% 급락 → 매수 회피
+      if (gap < -0.01) return -10; // -1% 하락 추세
+      return 0;
+    }
+
     // ═══ STEP 2: 관심종목 신호 분석 (매수) ═══
     const watchlist: string[] = config.watchlist ?? [];
 
@@ -428,9 +447,14 @@ async function runEngine(config: EngineConfig) {
       if (candles.length < 26) continue;
 
       const signal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : analyzeSignal(candles);
+      // 장 초반 흐름 보너스 적용
+      const bonus = getOpeningBonus(code);
+      const adjustedScore = signal.totalScore + bonus;
+      const adjustedStrength = adjustedScore >= 70 ? "strong" : adjustedScore >= 40 ? "weak" : "none";
+      const bonusTag = bonus !== 0 ? ` [장초반 ${bonus > 0 ? "+" : ""}${bonus}]` : "";
       await new Promise((r) => setTimeout(r, 200));
 
-      if (signal.strength === "strong" && signal.side === "buy") {
+      if (adjustedStrength === "strong" && signal.side === "buy") {
         const priceData = await getPrice(config, code);
         const price = Number(priceData?.stck_prpr) || 0;
         const name = priceData?.hts_kor_isnm || code;
@@ -438,7 +462,7 @@ async function runEngine(config: EngineConfig) {
 
         // #1 분할 매수: 1차 50%, 나중에 추가매수
         const existingPos = await getOpenPosition(code);
-        const buyRatio = existingPos?.phase === "initial" ? 1 : 0.5; // initial이면 나머지 50%
+        const buyRatio = existingPos?.phase === "initial" ? 1 : 0.5;
         const qty = Math.floor((maxPerTrade * buyRatio) / price);
         if (qty <= 0) continue;
 
@@ -448,35 +472,35 @@ async function runEngine(config: EngineConfig) {
           type: result.success ? (phase === "initial" ? "split_buy_1" : "split_buy_2") : "buy_failed",
           code, name,
           detail: result.success
-            ? `${signal.totalScore}점 (${signal.raw.regime}) → ${phase === "initial" ? "1차" : "2차"} 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg})`
-            : `${signal.totalScore}점 → 매수 실패: ${result.msg}`,
+            ? `${adjustedScore}점 (${signal.raw.regime})${bonusTag} → ${phase === "initial" ? "1차" : "2차"} 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg})`
+            : `${adjustedScore}점${bonusTag} → 매수 실패: ${result.msg}`,
         });
 
         if (result.success) {
           if (!existingPos) {
-            await openPosition(code, name, price, qty, signal, "initial");
+            await openPosition(code, name, price, qty, { ...signal, totalScore: adjustedScore }, "initial");
           }
           tradeCount++;
         }
         await new Promise((r) => setTimeout(r, 200));
 
-      } else if (signal.strength === "weak" && signal.side === "buy") {
+      } else if (adjustedStrength === "weak" && signal.side === "buy") {
         // DB에 승인 대기 신호 저장
         const priceData = await getPrice(config, code);
         const name = priceData?.hts_kor_isnm || code;
         try {
           await supabase.from("pending_signals").insert({
             stock_code: code, stock_name: name,
-            signal_score: signal.totalScore,
-            signal_comment: signal.comment,
-            signal_data: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount },
+            signal_score: adjustedScore,
+            signal_comment: `${signal.comment}${bonusTag}`,
+            signal_data: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount, openingBonus: bonus },
             source: "watchlist", status: "pending",
           });
         } catch { /* ignore */ }
 
         actions.push({
           type: "pending_approval", code, name,
-          detail: `약한 신호 ${signal.totalScore}점 → DB 저장, 승인 대기. ${signal.comment}`,
+          detail: `약한 신호 ${adjustedScore}점${bonusTag} → DB 저장, 승인 대기. ${signal.comment}`,
         });
         await new Promise((r) => setTimeout(r, 200));
       }
