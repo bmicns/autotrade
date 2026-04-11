@@ -17,12 +17,21 @@ interface NewsItem {
   summary?: string;
 }
 
+interface MarketContext {
+  kospi_rate: number;
+  kosdaq_rate: number;
+  avg_rate: number;
+  bonus: number;
+  label: string;
+}
+
 export function HomeTab() {
   const [newsTab, setNewsTab] = useState<"naver" | "dart">("naver");
   const [naverNews, setNaverNews] = useState<NewsItem[]>([]);
   const [disclosures, setDisclosures] = useState<NewsItem[]>([]);
   const [aiSentiment, setAiSentiment] = useState<NewsItem[]>([]);
   const [newsLoading, setNewsLoading] = useState(true);
+  const [marketCtx, setMarketCtx] = useState<MarketContext | null>(null);
 
   const holdings = useAppStore((s) => s.holdings);
   const prices = useAppStore((s) => s.prices);
@@ -50,6 +59,13 @@ export function HomeTab() {
       })
       .catch(() => {})
       .finally(() => setNewsLoading(false));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/engine-log")
+      .then((r) => r.json())
+      .then((d) => { if (d.marketContext) setMarketCtx(d.marketContext); })
+      .catch(() => {});
   }, []);
 
   function getPrice(code: string) {
@@ -129,7 +145,41 @@ export function HomeTab() {
         </div>
       </div>
 
-      <div style={{ height: 1, background: COLORS.line }} />
+      {/* 시장 모멘텀 배너 */}
+      {marketCtx && (
+        <div style={{
+          margin: "0 20px 0",
+          padding: "10px 14px",
+          background: marketCtx.avg_rate >= 0 ? COLORS.riseL : COLORS.fallL,
+          border: `1px solid ${marketCtx.avg_rate >= 0 ? COLORS.riseB : COLORS.fallB}`,
+          borderRadius: 10,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginTop: 10, marginBottom: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em" }}>시장 모멘텀</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: marketCtx.kospi_rate >= 0 ? COLORS.rise : COLORS.fall }}>
+                KOSPI {marketCtx.kospi_rate >= 0 ? "+" : ""}{marketCtx.kospi_rate.toFixed(2)}%
+              </span>
+              <span style={{ fontSize: 10, color: COLORS.dim }}>|</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: marketCtx.kosdaq_rate >= 0 ? COLORS.rise : COLORS.fall }}>
+                KOSDAQ {marketCtx.kosdaq_rate >= 0 ? "+" : ""}{marketCtx.kosdaq_rate.toFixed(2)}%
+              </span>
+            </div>
+          </div>
+          <span style={{
+            fontSize: 10, fontWeight: 600,
+            padding: "2px 7px", borderRadius: 5,
+            background: marketCtx.avg_rate >= 0 ? COLORS.rise : COLORS.fall,
+            color: "#fff",
+          }}>
+            {marketCtx.label || (marketCtx.avg_rate >= 0 ? "강세" : "약세")}
+          </span>
+        </div>
+      )}
+
+      <div style={{ height: 1, background: COLORS.line, marginTop: 10 }} />
 
       {/* ── 보유 종목 ── */}
       <div style={{ padding: "20px 20px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>

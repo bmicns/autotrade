@@ -1,9 +1,15 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { COLORS } from "@/lib/constants";
 import { useAppStore } from "@/lib/store";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Donut } from "@/components/ui/donut";
+
+interface PositionInfo {
+  stock_code: string;
+  entry_date: string;
+}
 
 export function PortfolioTab() {
   const holdings = useAppStore((s) => s.holdings);
@@ -11,6 +17,29 @@ export function PortfolioTab() {
   const kisConnected = useAppStore((s) => s.kisConnected);
   const cashBalance = useAppStore((s) => s.cashBalance);
   const storeTotalEval = useAppStore((s) => s.totalEval);
+  const [positionMap, setPositionMap] = useState<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    fetch("/api/positions")
+      .then((r) => r.json())
+      .then((data: PositionInfo[]) => {
+        if (Array.isArray(data)) {
+          const m = new Map<string, string>();
+          data.forEach((p) => m.set(p.stock_code, p.entry_date));
+          setPositionMap(m);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const MAX_HOLD_DAYS = 5;
+
+  function calcHoldInfo(code: string): { holdDays: number; dday: number } | null {
+    const entryDate = positionMap.get(code);
+    if (!entryDate) return null;
+    const holdDays = Math.max(1, Math.ceil((Date.now() - new Date(entryDate).getTime()) / 86400000));
+    return { holdDays, dday: MAX_HOLD_DAYS - holdDays };
+  }
 
   const enriched = holdings.map((h) => {
     const real = prices.get(h.code);
@@ -82,42 +111,60 @@ export function PortfolioTab() {
       <div style={{ padding: "20px 20px 10px" }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>보유 종목 ({enriched.length})</span>
       </div>
-      {enriched.map((h) => (
-        <div key={h.code}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
-              <div style={{
-                width: 42, height: 42, borderRadius: 12, flexShrink: 0,
-                background: h.up ? COLORS.riseL : COLORS.fallL,
-                border: `1.5px solid ${h.up ? COLORS.riseB : COLORS.fallB}`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: h.up ? COLORS.rise : COLORS.fall }}>{h.code.slice(0, 4)}</span>
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.ink }}>{h.name}</span>
-                <div style={{ marginTop: 3 }}>
-                  <span style={{ fontSize: 12, color: COLORS.dim }}>{h.quantity}주 · 평균 {h.avgPrice.toLocaleString()}</span>
+      {enriched.map((h) => {
+        const holdInfo = calcHoldInfo(h.code);
+        const isDanger = holdInfo !== null && holdInfo.dday <= 1;
+        return (
+          <div key={h.code}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+                <div style={{
+                  width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+                  background: h.up ? COLORS.riseL : COLORS.fallL,
+                  border: `1.5px solid ${h.up ? COLORS.riseB : COLORS.fallB}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: h.up ? COLORS.rise : COLORS.fall }}>{h.code.slice(0, 4)}</span>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.ink }}>{h.name}</span>
+                    {holdInfo !== null && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 700, padding: "2px 5px", borderRadius: 4,
+                        background: isDanger ? COLORS.fall : holdInfo.dday <= 2 ? COLORS.dim : COLORS.hero,
+                        color: "#fff",
+                      }}>
+                        {holdInfo.dday <= 0 ? "청산" : `D-${holdInfo.dday}`}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ marginTop: 3 }}>
+                    <span style={{ fontSize: 12, color: COLORS.dim }}>
+                      {h.quantity}주 · 평균 {h.avgPrice.toLocaleString()}
+                      {holdInfo !== null && ` · ${holdInfo.holdDays}일째`}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-              {h.cur > 0 && <Sparkline data={[h.cur * 0.98, h.cur * 0.99, h.cur]} color={h.up ? COLORS.rise : COLORS.fall} />}
-              <div style={{ textAlign: "right", minWidth: 72 }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink, fontVariantNumeric: "tabular-nums" }}>
-                  {h.cur > 0 ? h.cur.toLocaleString() : "—"}
-                </span>
-                <div style={{ marginTop: 3 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: h.up ? COLORS.rise : COLORS.fall, fontVariantNumeric: "tabular-nums" }}>
-                    {h.cur > 0 ? `${h.up ? "+" : ""}${h.pct.toFixed(2)}%` : "—"}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                {h.cur > 0 && <Sparkline data={[h.cur * 0.98, h.cur * 0.99, h.cur]} color={h.up ? COLORS.rise : COLORS.fall} />}
+                <div style={{ textAlign: "right", minWidth: 72 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink, fontVariantNumeric: "tabular-nums" }}>
+                    {h.cur > 0 ? h.cur.toLocaleString() : "—"}
                   </span>
+                  <div style={{ marginTop: 3 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: h.up ? COLORS.rise : COLORS.fall, fontVariantNumeric: "tabular-nums" }}>
+                      {h.cur > 0 ? `${h.up ? "+" : ""}${h.pct.toFixed(2)}%` : "—"}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
+            <div style={{ height: 1, background: COLORS.line }} />
           </div>
-          <div style={{ height: 1, background: COLORS.line }} />
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

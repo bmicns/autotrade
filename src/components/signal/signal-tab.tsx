@@ -22,17 +22,27 @@ interface PendingSignal {
   created_at: string;
 }
 
+interface FilterLog {
+  stock_code: string;
+  stock_name?: string;
+  action_type: string;
+  reason: string;
+  run_at: string;
+}
+
 export function SignalTab() {
   const kisConnected = useAppStore((s) => s.kisConnected);
   const kisConfig = useAppStore((s) => s.kisConfig);
   const [tab, setTab] = useState<"signals" | "watchlist">("signals");
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [signals, setSignals] = useState<PendingSignal[]>([]);
+  const [filterLogs, setFilterLogs] = useState<FilterLog[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ code: string; name: string; market: string }[]>([]);
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [dartCodes, setDartCodes] = useState<Set<string>>(new Set());
 
   const fetchWatchlist = useCallback(async () => {
     try {
@@ -51,6 +61,18 @@ export function SignalTab() {
   useEffect(() => {
     fetchWatchlist();
     fetchSignals();
+    fetch("/api/engine-log")
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.filterLogs)) setFilterLogs(d.filterLogs);
+        // DART 위험공시 종목 코드 세트 추출
+        const dartSet = new Set<string>();
+        (d.filterLogs as FilterLog[] || []).forEach((l) => {
+          if (l.action_type === "dart_filtered") dartSet.add(l.stock_code);
+        });
+        setDartCodes(dartSet);
+      })
+      .catch(() => {});
   }, [fetchWatchlist, fetchSignals]);
 
   // 종목 검색 디바운스
@@ -229,6 +251,43 @@ export function SignalTab() {
               </div>
             ))
           )}
+
+          {/* 필터 탈락 로그 */}
+          {filterLogs.length > 0 && (
+            <div style={{ marginTop: 24 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 10 }}>
+                최근 필터 탈락 ({filterLogs.length})
+              </div>
+              {filterLogs.map((l, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "9px 12px", borderRadius: 8, marginBottom: 6,
+                  background: l.action_type === "dart_filtered" ? COLORS.fallL : COLORS.sub,
+                  border: `1px solid ${l.action_type === "dart_filtered" ? COLORS.fallB : COLORS.line}`,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.ink }}>
+                        {l.stock_name || l.stock_code}
+                      </span>
+                      {l.action_type === "dart_filtered" && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4,
+                          background: COLORS.fall, color: "#fff",
+                        }}>DART</span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: 11, color: COLORS.dim, marginTop: 2, display: "block" }}>
+                      {l.reason}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 10, color: COLORS.dim, flexShrink: 0, marginLeft: 8 }}>
+                    {new Date(l.run_at).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -293,12 +352,23 @@ export function SignalTab() {
             watchlist.map((w) => (
               <div key={w.id} style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center",
-                background: COLORS.card, borderRadius: 10, padding: "12px 16px", marginBottom: 8,
-                border: `1px solid ${COLORS.line}`,
+                background: dartCodes.has(w.code) ? COLORS.fallL : COLORS.card,
+                borderRadius: 10, padding: "12px 16px", marginBottom: 8,
+                border: `1px solid ${dartCodes.has(w.code) ? COLORS.fallB : COLORS.line}`,
               }}>
-                <div>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.ink }}>{w.name || w.code}</span>
-                  {w.name && <span style={{ fontSize: 12, color: COLORS.dim, marginLeft: 8 }}>{w.code}</span>}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.ink }}>{w.name || w.code}</span>
+                      {dartCodes.has(w.code) && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, padding: "2px 5px", borderRadius: 4,
+                          background: COLORS.fall, color: "#fff",
+                        }}>⚠ DART</span>
+                      )}
+                    </div>
+                    {w.name && <span style={{ fontSize: 12, color: COLORS.dim }}>{w.code}</span>}
+                  </div>
                 </div>
                 <button
                   onClick={() => removeFromWatchlist(w.code)}
