@@ -4,6 +4,14 @@ import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
 import { analyzeSignal, analyzeSignalWithWeights, calcATR, calcDynamicRisk, checkRisk, type DailyCandle, type SignalResult } from "@/lib/kis/indicators";
 import { runLearning, type LearningResult } from "@/lib/learning";
 
+// ─── 투자자 동향 타입 ────────────────────────────
+interface InvestorTrend {
+  orgn: number;   // 기관 순매수 금액 (억원)
+  frgn: number;   // 외국인 순매수 금액 (억원)
+  bonus: number;  // 신호 보정 점수
+  label: string;  // 설명
+}
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -235,6 +243,65 @@ async function buyOrder(config: EngineConfig, code: string, qty: number): Promis
   return executeOrder(config, KIS_TR.BUY, code, qty, "buy");
 }
 
+// ─── 투자자별 매매동향 조회 (기관/외국인) ───────────
+async function getInvestorTrend(config: EngineConfig, code: string): Promise<InvestorTrend> {
+  const fallback: InvestorTrend = { orgn: 0, frgn: 0, bonus: 0, label: "" };
+  try {
+    const today = new Date(Date.now() + 9 * 3600000);
+    const end = today.toISOString().slice(0, 10).replace(/-/g, "");
+    const start = new Date(today.getTime() - 5 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
+
+    const params = new URLSearchParams({
+      fid_cond_mrkt_div_code: "J",
+      fid_input_iscd: code,
+      fid_input_date_1: start,
+      fid_input_date_2: end,
+    });
+    const res = await fetch(
+      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-investor?${params}`,
+      { headers: headers(config, KIS_TR.INVESTOR_TREND) },
+    );
+    if (!res.ok) return fallback;
+
+    const data = await res.json();
+    const rows: Record<string, string>[] = data.output || [];
+    if (rows.length === 0) return fallback;
+
+    // 최근 3일 합산 (단위: 백만원 → 억원)
+    const recent = rows.slice(0, 3);
+    const orgn = recent.reduce((s, r) => s + (Number(r.orgn_ntby_tr_pbmn) || 0), 0) / 100;
+    const frgn = recent.reduce((s, r) => s + (Number(r.frgn_ntby_tr_pbmn) || 0), 0) / 100;
+
+    // 보너스 점수 계산
+    let bonus = 0;
+    let label = "";
+
+    if (orgn > 0 && frgn > 0) {
+      bonus = 25;
+      label = `기관+외국인 동반매수 (기관 ${orgn.toFixed(0)}억, 외국인 ${frgn.toFixed(0)}억)`;
+    } else if (orgn > 0) {
+      bonus = 15;
+      label = `기관 순매수 ${orgn.toFixed(0)}억`;
+    } else if (frgn > 0) {
+      bonus = 10;
+      label = `외국인 순매수 ${frgn.toFixed(0)}억`;
+    } else if (orgn < 0 && frgn < 0) {
+      bonus = -25;
+      label = `기관+외국인 동반매도 (기관 ${orgn.toFixed(0)}억, 외국인 ${frgn.toFixed(0)}억)`;
+    } else if (orgn < 0) {
+      bonus = -15;
+      label = `기관 순매도 ${orgn.toFixed(0)}억`;
+    } else if (frgn < 0) {
+      bonus = -10;
+      label = `외국인 순매도 ${frgn.toFixed(0)}억`;
+    }
+
+    return { orgn, frgn, bonus, label };
+  } catch {
+    return fallback;
+  }
+}
+
 // ─── Cron GET ───────────────────────────────────
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
@@ -447,11 +514,17 @@ async function runEngine(config: EngineConfig) {
       if (candles.length < 26) continue;
 
       const signal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : analyzeSignal(candles);
-      // 장 초반 흐름 보너스 적용
-      const bonus = getOpeningBonus(code);
-      const adjustedScore = signal.totalScore + bonus;
+      // 장 초반 흐름 보너스
+      const openingBonus = getOpeningBonus(code);
+      // 기관/외국인 투자자 동향 보너스
+      const investor = await getInvestorTrend(config, code);
+      const totalBonus = openingBonus + investor.bonus;
+      const adjustedScore = signal.totalScore + totalBonus;
       const adjustedStrength = adjustedScore >= 70 ? "strong" : adjustedScore >= 40 ? "weak" : "none";
-      const bonusTag = bonus !== 0 ? ` [장초반 ${bonus > 0 ? "+" : ""}${bonus}]` : "";
+      const bonusTag = [
+        openingBonus !== 0 ? `장초반 ${openingBonus > 0 ? "+" : ""}${openingBonus}` : "",
+        investor.label ? `[${investor.label}]` : "",
+      ].filter(Boolean).join(" ");
       await new Promise((r) => setTimeout(r, 200));
 
       if (adjustedStrength === "strong" && signal.side === "buy") {
@@ -493,7 +566,7 @@ async function runEngine(config: EngineConfig) {
             stock_code: code, stock_name: name,
             signal_score: adjustedScore,
             signal_comment: `${signal.comment}${bonusTag}`,
-            signal_data: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount, openingBonus: bonus },
+            signal_data: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount, openingBonus, institutionalBonus: investor.bonus },
             source: "watchlist", status: "pending",
           });
         } catch { /* ignore */ }
@@ -521,9 +594,14 @@ async function runEngine(config: EngineConfig) {
         if (candles.length < 26) continue;
 
         const signal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : analyzeSignal(candles);
+        // 기관/외국인 투자자 동향 보너스 (급등주는 기관 역매도 위험 있으므로 반드시 체크)
+        const surgeInvestor = await getInvestorTrend(config, code);
+        const surgeAdjustedScore = signal.totalScore + surgeInvestor.bonus;
+        const surgeAdjustedStrength = surgeAdjustedScore >= 70 ? "strong" : surgeAdjustedScore >= 40 ? "weak" : "none";
+        const surgeInvestorTag = surgeInvestor.label ? ` [${surgeInvestor.label}]` : "";
         await new Promise((r) => setTimeout(r, 200));
 
-        if (signal.strength === "strong" && signal.side === "buy") {
+        if (surgeAdjustedStrength === "strong" && signal.side === "buy") {
           const priceData = await getPrice(config, code);
           const price = Number(priceData?.stck_prpr) || 0;
           const name = priceData?.hts_kor_isnm || code;
@@ -537,33 +615,33 @@ async function runEngine(config: EngineConfig) {
           actions.push({
             type: result.success ? "surge_buy" : "surge_buy_failed", code, name,
             detail: result.success
-              ? `급등주 ${signal.totalScore}점 (${signal.raw.regime}) → 1차 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg})`
-              : `급등주 ${signal.totalScore}점 → 매수 실패: ${result.msg}`,
+              ? `급등주 ${surgeAdjustedScore}점 (${signal.raw.regime})${surgeInvestorTag} → 1차 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg})`
+              : `급등주 ${surgeAdjustedScore}점${surgeInvestorTag} → 매수 실패: ${result.msg}`,
           });
 
           if (result.success) {
-            await openPosition(code, name, price, qty, signal, "initial");
+            await openPosition(code, name, price, qty, { ...signal, totalScore: surgeAdjustedScore }, "initial");
             tradeCount++;
           }
           await new Promise((r) => setTimeout(r, 200));
 
-        } else if (signal.strength === "weak" && signal.side === "buy") {
+        } else if (surgeAdjustedStrength === "weak" && signal.side === "buy") {
           // DB에 승인 대기 신호 저장
           const priceData2 = await getPrice(config, code);
           const surgeName = priceData2?.hts_kor_isnm || code;
           try {
             await supabase.from("pending_signals").insert({
               stock_code: code, stock_name: surgeName,
-              signal_score: signal.totalScore,
-              signal_comment: signal.comment,
-              signal_data: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount },
+              signal_score: surgeAdjustedScore,
+              signal_comment: `${signal.comment}${surgeInvestorTag}`,
+              signal_data: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount, institutionalBonus: surgeInvestor.bonus },
               source: "surge", status: "pending",
             });
           } catch { /* ignore */ }
 
           actions.push({
             type: "surge_pending", code, name: surgeName,
-            detail: `급등주 약한 ${signal.totalScore}점 → DB 저장, 승인 대기. ${signal.comment}`,
+            detail: `급등주 약한 ${surgeAdjustedScore}점${surgeInvestorTag} → DB 저장, 승인 대기. ${signal.comment}`,
           });
           await new Promise((r) => setTimeout(r, 200));
         }
