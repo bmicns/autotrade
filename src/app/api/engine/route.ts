@@ -29,6 +29,7 @@ interface EngineConfig {
   maxDailyTrades: number;
   takeProfitRatio: number;   // #1 익절 시 매도 비율 (0~100%)
   dailyLossLimit: number;    // #5 일일 최대 손실 한도 (%)
+  maxHoldDays: number;       // 최대 보유 기간 (일)
   dynamicRisk: boolean;      // #2 ATR 동적 손절 사용 여부
   watchlist?: string[];
 }
@@ -168,6 +169,110 @@ async function getPrice(config: EngineConfig, code: string) {
   return (await res.json()).output;
 }
 
+// ─── DART 공시 필터 ──────────────────────────────
+async function hasDangerousDisclosure(code: string): Promise<{ danger: boolean; reason: string }> {
+  const apiKey = process.env.DART_API_KEY;
+  if (!apiKey) return { danger: false, reason: "" };
+  try {
+    // 최근 30일 공시 조회
+    const endDate = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10).replace(/-/g, "");
+    const startDate = new Date(Date.now() + 9 * 3600000 - 30 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
+    const params = new URLSearchParams({
+      crtfc_key: apiKey,
+      corp_code: code,   // 실제론 corp_code 필요하나 stock_code로 조회 시도
+      bgn_de: startDate,
+      end_de: endDate,
+      page_count: "20",
+    });
+    // stock_code 기준 조회
+    const params2 = new URLSearchParams({
+      crtfc_key: apiKey,
+      stock_code: code,
+      bgn_de: startDate,
+      end_de: endDate,
+      page_count: "20",
+    });
+    const res = await fetch(`https://opendart.fss.or.kr/api/list.json?${params2}`, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    if (!res.ok) return { danger: false, reason: "" };
+    const data = await res.json();
+    if (data.status !== "000") return { danger: false, reason: "" };
+
+    // 위험 공시 키워드
+    const DANGER_KEYWORDS = [
+      "유상증자", "전환사채", "신주인수권", "감사의견 거절", "감사의견 한정",
+      "영업정지", "상장폐지", "횡령", "배임", "불성실공시",
+    ];
+    const disclosures: Array<{ report_nm: string }> = data.list || [];
+    for (const d of disclosures) {
+      const matched = DANGER_KEYWORDS.find((kw) => d.report_nm.includes(kw));
+      if (matched) return { danger: true, reason: `공시: ${matched} (${d.report_nm.slice(0, 30)})` };
+    }
+    return { danger: false, reason: "" };
+  } catch {
+    return { danger: false, reason: "" };
+  }
+}
+
+// ─── 종목 기본정보 (상장일) ──────────────────────
+async function getListingDate(config: EngineConfig, code: string): Promise<string> {
+  try {
+    const params = new URLSearchParams({ PDNO: code, PRDT_TYPE_CD: "300" });
+    const res = await fetch(
+      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/search-stock-info?${params}`,
+      { headers: headers(config, "CTPF1002R") },
+    );
+    if (!res.ok) return "";
+    const data = await res.json();
+    return (data.output?.lstg_dt as string) || "";
+  } catch {
+    return "";
+  }
+}
+
+// ─── 종목 필터 ───────────────────────────────────
+interface FilterResult {
+  passed: boolean;
+  reason: string;
+}
+
+function applyStockFilter(priceData: Record<string, string>, listingDate: string): FilterResult {
+  const reasons: string[] = [];
+
+  // 1. 시가총액 500억 이상 (hts_avls 단위: 억원, 없으면 통과)
+  const marketCap = Number(priceData.hts_avls || 0);
+  if (marketCap > 0 && marketCap < 500) {
+    reasons.push(`시가총액 ${marketCap}억 (500억 미만)`);
+  }
+
+  // 2. 시장경고 정상만 허용 (00=정상, 01=주의, 02=경고, 03=위험)
+  const warnCode = priceData.mrkt_warn_cls_code || "00";
+  if (warnCode !== "00") {
+    const warnLabel: Record<string, string> = { "01": "투자주의", "02": "투자경고", "03": "투자위험" };
+    reasons.push(`시장경고(${warnLabel[warnCode] ?? warnCode})`);
+  }
+
+  // 3. 정리매매 종목 제외
+  if (priceData.sltr_yn === "Y") {
+    reasons.push("정리매매 종목");
+  }
+
+  // 4. 상장 1년 이상 (listingDate=YYYYMMDD, 조회 실패 시 스킵)
+  if (listingDate.length === 8) {
+    const listed = new Date(
+      `${listingDate.slice(0, 4)}-${listingDate.slice(4, 6)}-${listingDate.slice(6, 8)}`,
+    );
+    const oneYearAgo = new Date(Date.now() - 365 * 86400000);
+    if (listed > oneYearAgo) {
+      const months = Math.floor((Date.now() - listed.getTime()) / (30 * 86400000));
+      reasons.push(`상장 ${months}개월 (1년 미만)`);
+    }
+  }
+
+  return { passed: reasons.length === 0, reason: reasons.join(", ") };
+}
+
 async function getDailyCandles(config: EngineConfig, code: string): Promise<DailyCandle[]> {
   const params = new URLSearchParams({
     fid_cond_mrkt_div_code: "J", fid_input_iscd: code,
@@ -241,6 +346,153 @@ async function sellOrder(config: EngineConfig, code: string, qty: number): Promi
 
 async function buyOrder(config: EngineConfig, code: string, qty: number): Promise<OrderResult> {
   return executeOrder(config, KIS_TR.BUY, code, qty, "buy");
+}
+
+// ─── 호가 단위 반올림 (KRX 기준) ────────────────
+function roundToTick(price: number): number {
+  if (price < 1000)    return Math.round(price);
+  if (price < 5000)    return Math.round(price / 5) * 5;
+  if (price < 10000)   return Math.round(price / 10) * 10;
+  if (price < 50000)   return Math.round(price / 50) * 50;
+  if (price < 100000)  return Math.round(price / 100) * 100;
+  if (price < 500000)  return Math.round(price / 500) * 500;
+  return Math.round(price / 1000) * 1000;
+}
+
+// ─── 지정가 매수 (현재가 -0.5%) ─────────────────
+async function limitBuyOrder(config: EngineConfig, code: string, qty: number, currentPrice: number): Promise<OrderResult & { limitPrice: number }> {
+  const limitPrice = roundToTick(currentPrice * 0.995);
+  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
+  try {
+    const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
+      method: "POST", headers: headers(config, KIS_TR.BUY),
+      body: JSON.stringify({
+        CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
+        PDNO: code, ORD_DVSN: "00",          // 지정가
+        ORD_QTY: String(qty), ORD_UNPR: String(limitPrice),
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "응답 없음");
+      return { success: false, msg: `HTTP ${res.status}: ${text.slice(0, 200)}`, limitPrice };
+    }
+    const data = await res.json();
+    if (data.rt_cd === "0") {
+      return { success: true, msg: data.msg1 || "성공", ordNo: data.output?.ODNO, raw: data, limitPrice };
+    }
+    return { success: false, msg: `[${data.rt_cd}] ${data.msg1 || data.msg}`, raw: data, limitPrice };
+  } catch (e: unknown) {
+    return { success: false, msg: e instanceof Error ? e.message : "네트워크 오류", limitPrice };
+  }
+}
+
+// ─── 미체결 매수 주문 조회 ───────────────────────
+interface OpenOrder {
+  odno: string;
+  orgn_odno: string;
+  ord_gno_brno: string;
+  pdno: string;
+  rmn_qty: string;
+}
+
+async function getOpenBuyOrders(config: EngineConfig): Promise<OpenOrder[]> {
+  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
+  try {
+    const params = new URLSearchParams({
+      CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
+      CTX_AREA_FK100: "", CTX_AREA_NK100: "",
+      INQR_DVSN_1: "", INQR_DVSN_2: "0",
+      PRDT_TYPE_CD: "300", SLL_BUY_DVSN_CD: "02",  // 02=매수
+    });
+    const res = await fetch(
+      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl?${params}`,
+      { headers: headers(config, KIS_TR.OPEN_ORDERS) },
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.output || []) as OpenOrder[];
+  } catch {
+    return [];
+  }
+}
+
+// ─── 미체결 주문 취소 ────────────────────────────
+async function cancelOpenBuyOrders(config: EngineConfig): Promise<{ cancelled: number; failed: number }> {
+  const orders = await getOpenBuyOrders(config);
+  let cancelled = 0, failed = 0;
+  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
+
+  for (const ord of orders) {
+    const rmn = Number(ord.rmn_qty || 0);
+    if (rmn <= 0) continue;
+    try {
+      const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-rvsecncl`, {
+        method: "POST", headers: headers(config, KIS_TR.CANCEL),
+        body: JSON.stringify({
+          CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
+          KRX_FWDG_ORD_ORGNO: ord.ord_gno_brno,
+          ORGN_ODNO: ord.odno,
+          ORD_DVSN: "00", RVSE_CNCL_DVSN_CD: "02",  // 취소
+          ORD_QTY: String(rmn), ORD_UNPR: "0", QTY_ALL_ORD_YN: "Y",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && (data as Record<string, string>).rt_cd === "0") cancelled++;
+      else failed++;
+    } catch {
+      failed++;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return { cancelled, failed };
+}
+
+// ─── 시장 전체 지수 모멘텀 (B안: KOSPI + KOSDAQ) ────
+interface MarketTrend {
+  kospiRate: number;
+  kosdaqRate: number;
+  bonus: number;
+  label: string;
+}
+
+async function getMarketTrend(config: EngineConfig): Promise<MarketTrend> {
+  const fallback: MarketTrend = { kospiRate: 0, kosdaqRate: 0, bonus: 0, label: "" };
+  try {
+    const fetchIndex = async (iscd: string) => {
+      const params = new URLSearchParams({ fid_cond_mrkt_div_code: "U", fid_input_iscd: iscd });
+      const res = await fetch(
+        `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-price?${params}`,
+        { headers: headers(config, "FHPUP02100000") },
+      );
+      if (!res.ok) return 0;
+      const data = await res.json();
+      return Number(data.output?.prdy_ctrt || 0);
+    };
+
+    const [kospiRate, kosdaqRate] = await Promise.all([
+      fetchIndex("0001"),  // KOSPI
+      fetchIndex("1001"),  // KOSDAQ
+    ]);
+
+    // 두 지수 평균으로 시장 방향 판단
+    const avgRate = (kospiRate + kosdaqRate) / 2;
+
+    let bonus = 0;
+    let label = "";
+    if (avgRate >= 1.0) {
+      bonus = 15; label = `시장 강세 (KOSPI ${kospiRate.toFixed(1)}% KOSDAQ ${kosdaqRate.toFixed(1)}%)`;
+    } else if (avgRate >= 0.3) {
+      bonus = 8;  label = `시장 상승 (KOSPI ${kospiRate.toFixed(1)}% KOSDAQ ${kosdaqRate.toFixed(1)}%)`;
+    } else if (avgRate <= -1.0) {
+      bonus = -20; label = `시장 급락 (KOSPI ${kospiRate.toFixed(1)}% KOSDAQ ${kosdaqRate.toFixed(1)}%)`;
+    } else if (avgRate <= -0.3) {
+      bonus = -10; label = `시장 하락 (KOSPI ${kospiRate.toFixed(1)}% KOSDAQ ${kosdaqRate.toFixed(1)}%)`;
+    }
+
+    return { kospiRate, kosdaqRate, bonus, label };
+  } catch {
+    return fallback;
+  }
 }
 
 // ─── 투자자별 매매동향 조회 (기관/외국인) ───────────
@@ -344,6 +596,7 @@ export async function GET(req: NextRequest) {
     takeProfitRatio: 50,   // #1
     dailyLossLimit: -3,    // #5
     dynamicRisk: true,     // #2
+    maxHoldDays: 5,        // 최대 5일 보유
     watchlist,
   };
 
@@ -355,7 +608,7 @@ export async function POST(req: NextRequest) {
   if (!config.token || !config.accountNo) {
     return NextResponse.json({ error: "KIS 설정 필요" }, { status: 400 });
   }
-  return runEngine({ ...config, takeProfitRatio: config.takeProfitRatio ?? 50, dailyLossLimit: config.dailyLossLimit ?? -3, dynamicRisk: config.dynamicRisk ?? true });
+  return runEngine({ ...config, takeProfitRatio: config.takeProfitRatio ?? 50, dailyLossLimit: config.dailyLossLimit ?? -3, dynamicRisk: config.dynamicRisk ?? true, maxHoldDays: config.maxHoldDays ?? 5 });
 }
 
 // ─── 엔진 본체 ──────────────────────────────────
@@ -382,6 +635,21 @@ async function runEngine(config: EngineConfig) {
 
     const actions: Array<{ type: string; code: string; name?: string; detail: string }> = [];
     let tradeCount = 0;
+
+    // ═══ STEP 0: 전 회차 미체결 매수 주문 취소 + 시장 모멘텀 조회 ═══
+    const [cancelResult, marketTrend] = await Promise.all([
+      cancelOpenBuyOrders(config),
+      getMarketTrend(config),
+    ]);
+    if (cancelResult.cancelled > 0 || cancelResult.failed > 0) {
+      actions.push({
+        type: "cancel_open_orders", code: "",
+        detail: `미체결 취소: 성공 ${cancelResult.cancelled}건, 실패 ${cancelResult.failed}건`,
+      });
+    }
+    if (marketTrend.label) {
+      actions.push({ type: "market_context", code: "", detail: `시장: ${marketTrend.label} (보정 ${marketTrend.bonus > 0 ? "+" : ""}${marketTrend.bonus}점)` });
+    }
 
     // #5 일일 손실 한도 체크
     const todayLoss = await getTodayRealizedLoss();
@@ -419,6 +687,28 @@ async function runEngine(config: EngineConfig) {
       }
 
       const risk = checkRisk(avgPrice, currentPrice, highPrice, stopLoss, takeProfit, trailingStop);
+
+      // ── 보유 기간 초과 강제 청산 ──
+      const pos = await getOpenPosition(code);
+      const maxHoldDays = config.maxHoldDays ?? 5;
+      if (pos && risk.action === "hold") {
+        const holdDays = Math.ceil((Date.now() - new Date(pos.entry_date).getTime()) / 86400000);
+        if (holdDays >= maxHoldDays) {
+          const result = await sellOrder(config, code, qty);
+          actions.push({
+            type: result.success ? "max_hold_sell" : "sell_failed", code, name,
+            detail: result.success
+              ? `보유 ${holdDays}일 초과 (최대 ${maxHoldDays}일) → 전량 청산 ${qty}주 (${result.msg})`
+              : `보유기간 초과 청산 실패: ${result.msg}`,
+          });
+          if (result.success) {
+            await closePosition(code, currentPrice, qty, "max_hold");
+            tradeCount++;
+          }
+          await new Promise((r) => setTimeout(r, 200));
+          continue;
+        }
+      }
 
       if (risk.action !== "hold") {
         // #1 분할 매도: 익절 시 takeProfitRatio%만 매도, 나머지는 트레일링
@@ -464,17 +754,17 @@ async function runEngine(config: EngineConfig) {
       const qty = Math.floor((maxPerTrade * 0.5) / price);
       if (qty <= 0) continue;
 
-      const result = await buyOrder(config, sig.stock_code, qty);
+      const result = await limitBuyOrder(config, sig.stock_code, qty, price);
       actions.push({
         type: result.success ? "approved_buy" : "approved_buy_failed",
         code: sig.stock_code, name,
         detail: result.success
-          ? `승인 매수 ${qty}주 @ ${price.toLocaleString()}원 (점수: ${sig.signal_score}) (${result.msg})`
+          ? `승인 지정가 매수 ${qty}주 @ ${result.limitPrice.toLocaleString()}원 (점수: ${sig.signal_score}) (${result.msg})`
           : `승인 매수 실패: ${result.msg}`,
       });
 
       if (result.success) {
-        await openPosition(sig.stock_code, name, price, qty, { strength: "weak", side: "buy", totalScore: sig.signal_score, comment: sig.signal_comment, indicators: [], raw: sig.signal_data || {}, matchCount: 0 } as SignalResult, "initial");
+        await openPosition(sig.stock_code, name, result.limitPrice, qty, { strength: "weak", side: "buy", totalScore: sig.signal_score, comment: sig.signal_comment, indicators: [], raw: sig.signal_data || {}, matchCount: 0 } as SignalResult, "initial");
         tradeCount++;
       }
 
@@ -518,12 +808,13 @@ async function runEngine(config: EngineConfig) {
       const openingBonus = getOpeningBonus(code);
       // 기관/외국인 투자자 동향 보너스
       const investor = await getInvestorTrend(config, code);
-      const totalBonus = openingBonus + investor.bonus;
+      const totalBonus = openingBonus + investor.bonus + marketTrend.bonus;
       const adjustedScore = signal.totalScore + totalBonus;
       const adjustedStrength = adjustedScore >= 70 ? "strong" : adjustedScore >= 40 ? "weak" : "none";
       const bonusTag = [
         openingBonus !== 0 ? `장초반 ${openingBonus > 0 ? "+" : ""}${openingBonus}` : "",
         investor.label ? `[${investor.label}]` : "",
+        marketTrend.label ? `[${marketTrend.label}]` : "",
       ].filter(Boolean).join(" ");
       await new Promise((r) => setTimeout(r, 200));
 
@@ -533,25 +824,42 @@ async function runEngine(config: EngineConfig) {
         const name = priceData?.hts_kor_isnm || code;
         if (price <= 0) continue;
 
-        // #1 분할 매수: 1차 50%, 나중에 추가매수
+        // ── 종목 필터 검사 ──
+        const listingDate = await getListingDate(config, code);
+        await new Promise((r) => setTimeout(r, 200));
+        const filter = applyStockFilter(priceData as Record<string, string>, listingDate);
+        if (!filter.passed) {
+          actions.push({ type: "filtered_out", code, name, detail: `종목 필터 탈락: ${filter.reason}` });
+          continue;
+        }
+
+        // ── DART 위험 공시 체크 ──
+        const dart = await hasDangerousDisclosure(code);
+        await new Promise((r) => setTimeout(r, 200));
+        if (dart.danger) {
+          actions.push({ type: "dart_filtered", code, name, detail: `DART 위험공시 탈락: ${dart.reason}` });
+          continue;
+        }
+
+        // #1 분할 매수: 1차 50%, 나중에 추가매수 (지정가: 현재가 -0.5%)
         const existingPos = await getOpenPosition(code);
         const buyRatio = existingPos?.phase === "initial" ? 1 : 0.5;
         const qty = Math.floor((maxPerTrade * buyRatio) / price);
         if (qty <= 0) continue;
 
-        const result = await buyOrder(config, code, qty);
+        const result = await limitBuyOrder(config, code, qty, price);
         const phase = existingPos ? "full" : "initial";
         actions.push({
           type: result.success ? (phase === "initial" ? "split_buy_1" : "split_buy_2") : "buy_failed",
           code, name,
           detail: result.success
-            ? `${adjustedScore}점 (${signal.raw.regime})${bonusTag} → ${phase === "initial" ? "1차" : "2차"} 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg})`
-            : `${adjustedScore}점${bonusTag} → 매수 실패: ${result.msg}`,
+            ? `${adjustedScore}점 (${signal.raw.regime}) ${bonusTag} → ${phase === "initial" ? "1차" : "2차"} 지정가 ${result.limitPrice.toLocaleString()}원 ${qty}주 (${result.msg})`
+            : `${adjustedScore}점 ${bonusTag} → 매수 실패: ${result.msg}`,
         });
 
         if (result.success) {
           if (!existingPos) {
-            await openPosition(code, name, price, qty, { ...signal, totalScore: adjustedScore }, "initial");
+            await openPosition(code, name, result.limitPrice, qty, { ...signal, totalScore: adjustedScore }, "initial");
           }
           tradeCount++;
         }
@@ -594,11 +902,14 @@ async function runEngine(config: EngineConfig) {
         if (candles.length < 26) continue;
 
         const signal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : analyzeSignal(candles);
-        // 기관/외국인 투자자 동향 보너스 (급등주는 기관 역매도 위험 있으므로 반드시 체크)
+        // 기관/외국인 + 시장 모멘텀 보너스
         const surgeInvestor = await getInvestorTrend(config, code);
-        const surgeAdjustedScore = signal.totalScore + surgeInvestor.bonus;
+        const surgeAdjustedScore = signal.totalScore + surgeInvestor.bonus + marketTrend.bonus;
         const surgeAdjustedStrength = surgeAdjustedScore >= 70 ? "strong" : surgeAdjustedScore >= 40 ? "weak" : "none";
-        const surgeInvestorTag = surgeInvestor.label ? ` [${surgeInvestor.label}]` : "";
+        const surgeInvestorTag = [
+          surgeInvestor.label ? `[${surgeInvestor.label}]` : "",
+          marketTrend.label ? `[${marketTrend.label}]` : "",
+        ].filter(Boolean).join(" ");
         await new Promise((r) => setTimeout(r, 200));
 
         if (surgeAdjustedStrength === "strong" && signal.side === "buy") {
@@ -607,20 +918,37 @@ async function runEngine(config: EngineConfig) {
           const name = priceData?.hts_kor_isnm || code;
           if (price <= 0) continue;
 
-          // 급등주는 1차 50%만 진입
+          // ── 종목 필터 검사 ──
+          const surgeListing = await getListingDate(config, code);
+          await new Promise((r) => setTimeout(r, 200));
+          const surgeFilter = applyStockFilter(priceData as Record<string, string>, surgeListing);
+          if (!surgeFilter.passed) {
+            actions.push({ type: "filtered_out", code, name, detail: `급등주 필터 탈락: ${surgeFilter.reason}` });
+            continue;
+          }
+
+          // ── DART 위험 공시 체크 ──
+          const surgeDart = await hasDangerousDisclosure(code);
+          await new Promise((r) => setTimeout(r, 200));
+          if (surgeDart.danger) {
+            actions.push({ type: "dart_filtered", code, name, detail: `급등주 DART 위험공시 탈락: ${surgeDart.reason}` });
+            continue;
+          }
+
+          // 급등주는 1차 50%만 진입 (지정가: 현재가 -0.5%)
           const qty = Math.floor((maxPerTrade * 0.5) / price);
           if (qty <= 0) continue;
 
-          const result = await buyOrder(config, code, qty);
+          const result = await limitBuyOrder(config, code, qty, price);
           actions.push({
             type: result.success ? "surge_buy" : "surge_buy_failed", code, name,
             detail: result.success
-              ? `급등주 ${surgeAdjustedScore}점 (${signal.raw.regime})${surgeInvestorTag} → 1차 매수 ${qty}주 @ ${price.toLocaleString()}원 (${result.msg})`
+              ? `급등주 ${surgeAdjustedScore}점 (${signal.raw.regime})${surgeInvestorTag} → 1차 지정가 ${result.limitPrice.toLocaleString()}원 ${qty}주 (${result.msg})`
               : `급등주 ${surgeAdjustedScore}점${surgeInvestorTag} → 매수 실패: ${result.msg}`,
           });
 
           if (result.success) {
-            await openPosition(code, name, price, qty, { ...signal, totalScore: surgeAdjustedScore }, "initial");
+            await openPosition(code, name, result.limitPrice, qty, { ...signal, totalScore: surgeAdjustedScore }, "initial");
             tradeCount++;
           }
           await new Promise((r) => setTimeout(r, 200));

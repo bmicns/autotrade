@@ -35,4 +35,5 @@ export const KIS_TR = {
   WS_ASKING: "H0STASP0",
   WS_EXECUTION: "H0STCNI9",
   INVESTOR_TREND: "FHKST01010900",  // 투자자별 매매동향
+  OPEN_ORDERS: "VTTC8036R",         // 미체결 조회
 } as const;
