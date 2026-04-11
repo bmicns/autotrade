@@ -751,7 +751,9 @@ async function runEngine(config: EngineConfig) {
       const name = priceData?.hts_kor_isnm || sig.stock_name || sig.stock_code;
       if (price <= 0) continue;
 
-      const qty = Math.floor((maxPerTrade * 0.5) / price);
+      // qty_override가 있으면 우선 사용 (수동 지정 수량)
+      const qtyOverride = sig.signal_data?.qty_override ? Number(sig.signal_data.qty_override) : 0;
+      const qty = qtyOverride > 0 ? qtyOverride : Math.floor((maxPerTrade * 0.5) / price);
       if (qty <= 0) continue;
 
       const result = await limitBuyOrder(config, sig.stock_code, qty, price);
