@@ -1,0 +1,28 @@
+{
+  "compiled_at": "2026-04-12T00:00:00.000Z",
+  "version": 2,
+  "project": "NEXIO",
+  "topics": [
+    "platform-overview",
+    "trading-engine",
+    "signal-system",
+    "adaptive-engine",
+    "order-management",
+    "database",
+    "deployment"
+  ],
+  "concepts": [],
+  "source_files_scanned": [
+    "README.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "package.json",
+    "docs/01-plan/features/adaptive-engine.plan.md",
+    "docs/02-design/features/adaptive-engine.design.md",
+    "docs/03-analysis/adaptive-engine.analysis.md",
+    "docs/04-report/features/adaptive-engine.report.md"
+  ],
+  "knowledge_files_read": 8,
+  "total_articles": 7,
+  "status": "complete"
+}

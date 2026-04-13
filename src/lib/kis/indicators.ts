@@ -350,17 +350,54 @@ export function analyzeSignalWithWeights(candles: DailyCandle[], customWeights?:
   return { ...result, totalScore, matchCount, strength, side };
 }
 
+// ─── ATR 배수 인터페이스 ──────────────────────────
+export interface AtrMultipliers {
+  stop: number;       // 기본 2.0
+  profit: number;     // 기본 3.0
+  trailing: number;   // 기본 1.5
+}
+
+export const DEFAULT_ATR_MULTIPLIERS: AtrMultipliers = {
+  stop: 2.0,
+  profit: 3.0,
+  trailing: 1.5,
+};
+
 // ─── ATR 기반 동적 손절/익절 계산 ─────────────────
-export function calcDynamicRisk(atr: number, currentPrice: number) {
-  // ATR × 2 = 손절, ATR × 3 = 익절 (비율로 변환)
-  const stopLossPercent = currentPrice > 0 ? -((atr * 2) / currentPrice) * 100 : -5;
-  const takeProfitPercent = currentPrice > 0 ? ((atr * 3) / currentPrice) * 100 : 5;
-  const trailingPercent = currentPrice > 0 ? -((atr * 1.5) / currentPrice) * 100 : -3;
+export function calcDynamicRisk(
+  atr: number,
+  currentPrice: number,
+  multipliers: AtrMultipliers = DEFAULT_ATR_MULTIPLIERS
+) {
+  const stopLossPercent = currentPrice > 0 ? -((atr * multipliers.stop) / currentPrice) * 100 : -5;
+  const takeProfitPercent = currentPrice > 0 ? ((atr * multipliers.profit) / currentPrice) * 100 : 5;
+  const trailingPercent = currentPrice > 0 ? -((atr * multipliers.trailing) / currentPrice) * 100 : -3;
   return {
-    stopLoss: Math.min(stopLossPercent, -2),    // 최소 -2%
-    takeProfit: Math.max(takeProfitPercent, 3),  // 최소 +3%
-    trailingStop: Math.min(trailingPercent, -1.5), // 최소 -1.5%
+    stopLoss: Math.min(stopLossPercent, -2),       // 최소 -2%
+    takeProfit: Math.max(takeProfitPercent, 3),     // 최소 +3%
+    trailingStop: Math.min(trailingPercent, -1.5),  // 최소 -1.5%
   };
+}
+
+// ─── ATR 기반 포지션 사이징 ───────────────────────
+// 목표 손실 금액 / 손절 폭 비율 = 투자 금액 (변동성 역비례)
+export function calcPositionSize(
+  atr: number,
+  currentPrice: number,
+  targetRiskAmount: number,   // 원 (기본 30000)
+  maxPerTrade: number,        // 원 상한선 (기본 1000000)
+  stopMultiplier = 2.0
+): number {
+  if (atr <= 0 || currentPrice <= 0) return maxPerTrade;
+
+  const stopRatio = (atr * stopMultiplier) / currentPrice;
+  if (stopRatio <= 0) return maxPerTrade;
+
+  const calculated = targetRiskAmount / stopRatio;
+  const capped = Math.min(calculated, maxPerTrade);
+
+  // 최소 1주 금액 보장
+  return Math.max(Math.floor(capped), currentPrice);
 }
 
 // ─── 손절/익절/트레일링 스탑 판단 ────────────────

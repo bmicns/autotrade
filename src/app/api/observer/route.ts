@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
+import { runLearning } from "@/lib/learning";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -77,5 +78,20 @@ export async function GET(req: NextRequest) {
     await supabase.from("market_snapshots").insert(snapshots);
   }
 
-  return NextResponse.json({ captured: snapshots.length, stocks: snapshots.map((s) => s.stock_code) });
+  // 주 1회 학습 실행: UTC 월요일 00:00 = KST 월요일 09:00
+  let learningResult: { confidence?: string; sampleSize?: number } | null = null;
+  const nowUtc = new Date();
+  const isLearningDay = nowUtc.getUTCDay() === 1; // UTC 월요일
+  if (isLearningDay) {
+    try {
+      const result = await runLearning();
+      learningResult = { confidence: result.confidence, sampleSize: result.sampleSize };
+    } catch { /* 학습 실패해도 observer 결과에 영향 없음 */ }
+  }
+
+  return NextResponse.json({
+    captured: snapshots.length,
+    stocks: snapshots.map((s) => s.stock_code),
+    ...(learningResult ? { learning: learningResult } : {}),
+  });
 }

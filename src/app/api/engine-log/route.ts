@@ -11,8 +11,8 @@ export async function GET() {
     // 최근 엔진 실행 5건에서 market_context + filter 로그 추출
     const { data, error } = await supabase
       .from("engine_runs")
-      .select("id, created_at, actions")
-      .order("created_at", { ascending: false })
+      .select("id, run_at, actions")
+      .order("run_at", { ascending: false })
       .limit(5);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -60,7 +60,7 @@ export async function GET() {
             stock_name: a.stock_name ? String(a.stock_name) : undefined,
             action_type: String(a.action_type),
             reason: String(a.reason ?? ""),
-            run_at: String(run.created_at ?? ""),
+            run_at: String(run.run_at ?? ""),
           });
         }
       }

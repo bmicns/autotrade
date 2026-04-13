@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { COLORS } from "@/lib/constants";
 import { Icon } from "@/components/ui/icons";
 import { BacktestSection } from "@/components/stats/backtest-section";
+import { LearningSection } from "@/components/stats/learning-section";
+import { StockStatsSection, type StockStat } from "@/components/stats/stock-stats-section";
 import type { PerformanceStats } from "@/lib/analytics";
 
 type Period = "1w" | "1m" | "3m" | "all";
@@ -32,16 +34,43 @@ interface StatsData extends PerformanceStats {
   }>;
 }
 
+interface LearningData {
+  snapshot: import("@/components/stats/learning-section").LearningSnapshot | null;
+  isExpired: boolean;
+  history: import("@/components/stats/learning-section").LearningSnapshot[];
+}
+
+// LearningSnapshot 타입 재export (stats-tab 내부용)
+type LearningSnapshot = import("@/components/stats/learning-section").LearningSnapshot;
+
 export function StatsTab() {
   const [period, setPeriod] = useState<Period>("all");
   const [stats, setStats] = useState<StatsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [learningData, setLearningData] = useState<LearningData | null>(null);
+  const [stockStats, setStockStats] = useState<StockStat[]>([]);
 
   const fetchStats = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/stats?period=${period}`);
-      if (res.ok) setStats(await res.json());
+      const [statsRes, learnRes, stocksRes] = await Promise.all([
+        fetch(`/api/stats?period=${period}`),
+        fetch("/api/learn?history=5"),
+        fetch("/api/stats/stocks"),
+      ]);
+      if (statsRes.ok) setStats(await statsRes.json());
+      if (learnRes.ok) {
+        const learnJson = await learnRes.json();
+        setLearningData({
+          snapshot: learnJson.snapshot as LearningSnapshot | null,
+          isExpired: learnJson.isExpired ?? true,
+          history: (learnJson.history ?? []) as LearningSnapshot[],
+        });
+      }
+      if (stocksRes.ok) {
+        const stocksJson = await stocksRes.json();
+        setStockStats(stocksJson.stocks ?? []);
+      }
     } catch { /* ignore */ }
     finally { setLoading(false); }
   }, [period]);
@@ -296,6 +325,22 @@ export function StatsTab() {
         </div>
       )}
       <BacktestSection />
+
+      {/* ── 자가학습 현황 ── */}
+      <div style={{ height: 1, background: COLORS.line }} />
+      <LearningSection
+        snapshot={learningData?.snapshot ?? null}
+        isExpired={learningData?.isExpired ?? true}
+        history={learningData?.history ?? []}
+      />
+
+      {/* ── 종목별 성과 ── */}
+      {stockStats.length > 0 && (
+        <>
+          <div style={{ height: 1, background: COLORS.line }} />
+          <StockStatsSection stats={stockStats} />
+        </>
+      )}
     </div>
   );
 }

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
-import { analyzeSignal, analyzeSignalWithWeights, calcATR, calcDynamicRisk, checkRisk, type DailyCandle, type SignalResult } from "@/lib/kis/indicators";
-import { runLearning, type LearningResult } from "@/lib/learning";
+import { analyzeSignal, analyzeSignalWithWeights, calcATR, calcDynamicRisk, calcPositionSize, DEFAULT_ATR_MULTIPLIERS, checkRisk, type AtrMultipliers, type DailyCandle, type SignalResult } from "@/lib/kis/indicators";
+import { loadLatestLearning, applyLearning, type LearningResult } from "@/lib/learning";
 
 // ─── 투자자 동향 타입 ────────────────────────────
 interface InvestorTrend {
@@ -66,6 +66,71 @@ async function closePosition(code: string, exitPrice: number, exitQty: number, e
       pnl_percent: Math.round(pnlPercent * 100) / 100,
       hold_days: holdDays, status: "closed",
     }).eq("id", pos.id);
+  } catch { /* ignore */ }
+}
+
+// ─── trade_memory 헬퍼 ──────────────────────────
+function extractCandlePattern(signal: SignalResult): string {
+  const patternInd = signal.indicators.find((i) => i.name === "캔들패턴");
+  return patternInd?.value ?? "없음";
+}
+
+async function recordTradeMemory(params: {
+  code: string;
+  name: string;
+  baseSignal: SignalResult;
+  learnedSignal: SignalResult;
+  bonuses: { market: number; investor: number; snapshot: number };
+  adjustedScore: number;
+  weightsSource: "learned" | "default";
+  positionSize: number;
+}): Promise<void> {
+  try {
+    const raw = params.learnedSignal.raw;
+    await supabase.from("trade_memory").insert({
+      stock_code: params.code,
+      stock_name: params.name,
+      rsi_value: raw.rsi,
+      macd_histogram: raw.macd,
+      ma_cross: raw.macdCrossover === "golden" ? "golden" : raw.macdCrossover === "dead" ? "dead" : "none",
+      bb_position: raw.bbPosition,
+      volume_ratio: raw.volumeRatio,
+      adx_value: raw.adx,
+      candle_pattern: extractCandlePattern(params.learnedSignal),
+      regime: raw.regime,
+      base_score: params.baseSignal.totalScore,
+      learned_score: params.learnedSignal.totalScore,
+      total_score: params.adjustedScore,
+      market_bonus: params.bonuses.market,
+      investor_bonus: params.bonuses.investor,
+      snapshot_bonus: params.bonuses.snapshot,
+      weights_source: params.weightsSource,
+      atr_value: raw.atr,
+      position_size: params.positionSize,
+    });
+  } catch { /* ignore */ }
+}
+
+async function closeTradeMemory(
+  code: string,
+  pnlPercent: number,
+  pnlAmount: number,
+  holdDays: number,
+  exitReason: string
+): Promise<void> {
+  try {
+    await supabase.from("trade_memory")
+      .update({
+        pnl_percent: Math.round(pnlPercent * 100) / 100,
+        pnl_amount: Math.round(pnlAmount),
+        hold_days: holdDays,
+        exit_reason: exitReason,
+        is_win: pnlAmount > 0,
+        closed_at: new Date().toISOString(),
+      })
+      .eq("stock_code", code)
+      .is("closed_at", null)
+      .order("created_at", { ascending: false });
   } catch { /* ignore */ }
 }
 
@@ -617,21 +682,20 @@ async function runEngine(config: EngineConfig) {
   let scannedCount = 0;
 
   try {
-    // ── 자가 학습: 과거 성과 기반 파라미터 자동 조정 ──
+    // ── 자가 학습: 최신 스냅샷 로딩 (매 실행마다 학습 X, 주 1회 별도 Cron에서 학습) ──
     let learning: LearningResult | null = null;
-    try { learning = await runLearning(); } catch { /* 학습 실패 시 기본값 사용 */ }
+    try { learning = await loadLatestLearning(); } catch { /* 학습 로딩 실패 시 기본값 사용 */ }
 
-    // 학습된 리스크 파라미터 적용 (학습 결과 있으면 덮어쓰기)
-    let stopLoss = learning?.risk.source === "learned" ? learning.risk.stopLoss : (config.stopLoss ?? -5);
-    let takeProfit = learning?.risk.source === "learned" ? learning.risk.takeProfit : (config.takeProfit ?? 5);
-    let trailingStop = learning?.risk.source === "learned" ? learning.risk.trailingStop : (config.trailingStop ?? -3);
+    // 신뢰도 등급별 학습 적용 범위 차등화
+    const applied = applyLearning(learning, config);
+
     const maxPerTrade = config.maxPerTrade ?? 1000000;
     const maxDailyTrades = config.maxDailyTrades ?? 5;
-    const takeProfitRatio = learning?.risk.source === "learned" ? learning.risk.takeProfitRatio : (config.takeProfitRatio ?? 50);
+    const takeProfitRatio = applied.takeProfitRatio;
     const dailyLossLimit = config.dailyLossLimit ?? -3;
 
-    // 학습된 가중치
-    const customWeights = learning?.weights.source === "learned" ? learning.weights : undefined;
+    // 학습된 가중치 (신뢰도 medium+ 일 때만 적용)
+    const customWeights = applied.weights;
 
     const actions: Array<{ type: string; code: string; name?: string; detail: string }> = [];
     let tradeCount = 0;
@@ -673,20 +737,25 @@ async function runEngine(config: EngineConfig) {
       const highPrice = Number(h.stck_hgpr) || currentPrice;
       const name = h.prdt_name || code;
 
-      // #2 ATR 동적 손절
+      // #2 ATR 동적 손절 — 루프 내 독립 계산 (스코프 버그 해소)
+      const holdAtrMultipliers: AtrMultipliers = applied.atrMultipliers;
+      let holdStopLoss = config.stopLoss ?? -5;
+      let holdTakeProfit = config.takeProfit ?? 5;
+      let holdTrailingStop = config.trailingStop ?? -3;
+
       if (config.dynamicRisk) {
-        const candles = await getDailyCandles(config, code);
-        if (candles.length >= 15) {
-          const atr = calcATR(candles);
-          const dynamic = calcDynamicRisk(atr, currentPrice);
-          stopLoss = dynamic.stopLoss;
-          takeProfit = dynamic.takeProfit;
-          trailingStop = dynamic.trailingStop;
+        const holdCandles = await getDailyCandles(config, code);
+        if (holdCandles.length >= 15) {
+          const holdAtr = calcATR(holdCandles);
+          const dynamic = calcDynamicRisk(holdAtr, currentPrice, holdAtrMultipliers);
+          holdStopLoss = dynamic.stopLoss;
+          holdTakeProfit = dynamic.takeProfit;
+          holdTrailingStop = dynamic.trailingStop;
         }
         await new Promise((r) => setTimeout(r, 200));
       }
 
-      const risk = checkRisk(avgPrice, currentPrice, highPrice, stopLoss, takeProfit, trailingStop);
+      const risk = checkRisk(avgPrice, currentPrice, highPrice, holdStopLoss, holdTakeProfit, holdTrailingStop);
 
       // ── 보유 기간 초과 강제 청산 ──
       const pos = await getOpenPosition(code);
@@ -702,7 +771,11 @@ async function runEngine(config: EngineConfig) {
               : `보유기간 초과 청산 실패: ${result.msg}`,
           });
           if (result.success) {
+            const holdDaysVal = Math.max(1, Math.ceil((Date.now() - new Date(pos?.entry_date).getTime()) / 86400000));
+            const pnlPct = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
+            const pnlAmt = (currentPrice - avgPrice) * qty;
             await closePosition(code, currentPrice, qty, "max_hold");
+            await closeTradeMemory(code, pnlPct, pnlAmt, holdDaysVal, "max_hold");
             tradeCount++;
           }
           await new Promise((r) => setTimeout(r, 200));
@@ -726,8 +799,12 @@ async function runEngine(config: EngineConfig) {
         });
 
         if (result.success) {
+          const sellPnlPct = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
+          const sellPnlAmt = (currentPrice - avgPrice) * sellQty;
+          const holdDaysVal = pos ? Math.max(1, Math.ceil((Date.now() - new Date(pos.entry_date).getTime()) / 86400000)) : 1;
           if (sellQty >= qty) {
             await closePosition(code, currentPrice, sellQty, risk.action);
+            await closeTradeMemory(code, sellPnlPct, sellPnlAmt, holdDaysVal, risk.action);
           }
           tradeCount++;
         }
@@ -805,14 +882,22 @@ async function runEngine(config: EngineConfig) {
       scannedCount++;
       if (candles.length < 26) continue;
 
-      const signal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : analyzeSignal(candles);
+      // [A] 기본 가중치 점수 (항상 계산)
+      const baseSignal = analyzeSignal(candles);
+      // [B] 학습 가중치 점수 (가중치 있을 때만, 없으면 baseSignal 재사용)
+      const learnedSignal = customWeights
+        ? analyzeSignalWithWeights(candles, customWeights)
+        : baseSignal;
+
       // 장 초반 흐름 보너스
       const openingBonus = getOpeningBonus(code);
       // 기관/외국인 투자자 동향 보너스
       const investor = await getInvestorTrend(config, code);
       const totalBonus = openingBonus + investor.bonus + marketTrend.bonus;
-      const adjustedScore = signal.totalScore + totalBonus;
+      // 매수 결정은 learnedSignal 기준
+      const adjustedScore = learnedSignal.totalScore + totalBonus;
       const adjustedStrength = adjustedScore >= 70 ? "strong" : adjustedScore >= 40 ? "weak" : "none";
+      const weightsSource: "learned" | "default" = customWeights ? "learned" : "default";
       const bonusTag = [
         openingBonus !== 0 ? `장초반 ${openingBonus > 0 ? "+" : ""}${openingBonus}` : "",
         investor.label ? `[${investor.label}]` : "",
@@ -820,7 +905,7 @@ async function runEngine(config: EngineConfig) {
       ].filter(Boolean).join(" ");
       await new Promise((r) => setTimeout(r, 200));
 
-      if (adjustedStrength === "strong" && signal.side === "buy") {
+      if (adjustedStrength === "strong" && learnedSignal.side === "buy") {
         const priceData = await getPrice(config, code);
         const price = Number(priceData?.stck_prpr) || 0;
         const name = priceData?.hts_kor_isnm || code;
@@ -843,10 +928,17 @@ async function runEngine(config: EngineConfig) {
           continue;
         }
 
-        // #1 분할 매수: 1차 50%, 나중에 추가매수 (지정가: 현재가 -0.5%)
+        // 포지션 사이징: ATR 기반 투자금액 (변동성 역비례)
         const existingPos = await getOpenPosition(code);
         const buyRatio = existingPos?.phase === "initial" ? 1 : 0.5;
-        const qty = Math.floor((maxPerTrade * buyRatio) / price);
+        const positionSize = calcPositionSize(
+          learnedSignal.raw.atr,
+          price,
+          applied.targetRiskAmount,
+          maxPerTrade,
+          applied.atrMultipliers.stop
+        );
+        const qty = Math.floor((positionSize * buyRatio) / price);
         if (qty <= 0) continue;
 
         const result = await limitBuyOrder(config, code, qty, price);
@@ -855,35 +947,43 @@ async function runEngine(config: EngineConfig) {
           type: result.success ? (phase === "initial" ? "split_buy_1" : "split_buy_2") : "buy_failed",
           code, name,
           detail: result.success
-            ? `${adjustedScore}점 (${signal.raw.regime}) ${bonusTag} → ${phase === "initial" ? "1차" : "2차"} 지정가 ${result.limitPrice.toLocaleString()}원 ${qty}주 (${result.msg})`
+            ? `${adjustedScore}점 (${learnedSignal.raw.regime}) B:${baseSignal.totalScore}/L:${learnedSignal.totalScore} ${bonusTag} → ${phase === "initial" ? "1차" : "2차"} 지정가 ${result.limitPrice.toLocaleString()}원 ${qty}주 (${result.msg})`
             : `${adjustedScore}점 ${bonusTag} → 매수 실패: ${result.msg}`,
         });
 
         if (result.success) {
           if (!existingPos) {
-            await openPosition(code, name, result.limitPrice, qty, { ...signal, totalScore: adjustedScore }, "initial");
+            await openPosition(code, name, result.limitPrice, qty, { ...learnedSignal, totalScore: adjustedScore }, "initial");
+            await recordTradeMemory({
+              code, name,
+              baseSignal,
+              learnedSignal,
+              bonuses: { market: marketTrend.bonus, investor: investor.bonus, snapshot: openingBonus },
+              adjustedScore,
+              weightsSource,
+              positionSize: qty * result.limitPrice,
+            });
           }
           tradeCount++;
         }
         await new Promise((r) => setTimeout(r, 200));
 
-      } else if (adjustedStrength === "weak" && signal.side === "buy") {
-        // DB에 승인 대기 신호 저장
+      } else if (adjustedStrength === "weak" && learnedSignal.side === "buy") {
         const priceData = await getPrice(config, code);
         const name = priceData?.hts_kor_isnm || code;
         try {
           await supabase.from("pending_signals").insert({
             stock_code: code, stock_name: name,
             signal_score: adjustedScore,
-            signal_comment: `${signal.comment}${bonusTag}`,
-            signal_data: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount, openingBonus, institutionalBonus: investor.bonus },
+            signal_comment: `${learnedSignal.comment}${bonusTag}`,
+            signal_data: { indicators: learnedSignal.indicators, raw: learnedSignal.raw, matchCount: learnedSignal.matchCount, openingBonus, institutionalBonus: investor.bonus },
             source: "watchlist", status: "pending",
           });
         } catch { /* ignore */ }
 
         actions.push({
           type: "pending_approval", code, name,
-          detail: `약한 신호 ${adjustedScore}점${bonusTag} → DB 저장, 승인 대기. ${signal.comment}`,
+          detail: `약한 신호 ${adjustedScore}점${bonusTag} → DB 저장, 승인 대기. ${learnedSignal.comment}`,
         });
         await new Promise((r) => setTimeout(r, 200));
       }
@@ -903,18 +1003,23 @@ async function runEngine(config: EngineConfig) {
         scannedCount++;
         if (candles.length < 26) continue;
 
-        const signal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : analyzeSignal(candles);
+        // [A] 기본 가중치 / [B] 학습 가중치
+        const surgeBaseSignal = analyzeSignal(candles);
+        const surgeLearnedSignal = customWeights
+          ? analyzeSignalWithWeights(candles, customWeights)
+          : surgeBaseSignal;
         // 기관/외국인 + 시장 모멘텀 보너스
         const surgeInvestor = await getInvestorTrend(config, code);
-        const surgeAdjustedScore = signal.totalScore + surgeInvestor.bonus + marketTrend.bonus;
+        const surgeAdjustedScore = surgeLearnedSignal.totalScore + surgeInvestor.bonus + marketTrend.bonus;
         const surgeAdjustedStrength = surgeAdjustedScore >= 70 ? "strong" : surgeAdjustedScore >= 40 ? "weak" : "none";
+        const surgeWeightsSource: "learned" | "default" = customWeights ? "learned" : "default";
         const surgeInvestorTag = [
           surgeInvestor.label ? `[${surgeInvestor.label}]` : "",
           marketTrend.label ? `[${marketTrend.label}]` : "",
         ].filter(Boolean).join(" ");
         await new Promise((r) => setTimeout(r, 200));
 
-        if (surgeAdjustedStrength === "strong" && signal.side === "buy") {
+        if (surgeAdjustedStrength === "strong" && surgeLearnedSignal.side === "buy") {
           const priceData = await getPrice(config, code);
           const price = Number(priceData?.stck_prpr) || 0;
           const name = priceData?.hts_kor_isnm || code;
@@ -937,41 +1042,56 @@ async function runEngine(config: EngineConfig) {
             continue;
           }
 
-          // 급등주는 1차 50%만 진입 (지정가: 현재가 -0.5%)
-          const qty = Math.floor((maxPerTrade * 0.5) / price);
+          // 포지션 사이징: ATR 기반 (급등주는 50% 상한)
+          const surgePositionSize = calcPositionSize(
+            surgeLearnedSignal.raw.atr,
+            price,
+            applied.targetRiskAmount,
+            maxPerTrade,
+            applied.atrMultipliers.stop
+          );
+          const qty = Math.floor((surgePositionSize * 0.5) / price);
           if (qty <= 0) continue;
 
           const result = await limitBuyOrder(config, code, qty, price);
           actions.push({
             type: result.success ? "surge_buy" : "surge_buy_failed", code, name,
             detail: result.success
-              ? `급등주 ${surgeAdjustedScore}점 (${signal.raw.regime})${surgeInvestorTag} → 1차 지정가 ${result.limitPrice.toLocaleString()}원 ${qty}주 (${result.msg})`
+              ? `급등주 ${surgeAdjustedScore}점 (${surgeLearnedSignal.raw.regime}) B:${surgeBaseSignal.totalScore}/L:${surgeLearnedSignal.totalScore}${surgeInvestorTag} → 1차 지정가 ${result.limitPrice.toLocaleString()}원 ${qty}주 (${result.msg})`
               : `급등주 ${surgeAdjustedScore}점${surgeInvestorTag} → 매수 실패: ${result.msg}`,
           });
 
           if (result.success) {
-            await openPosition(code, name, result.limitPrice, qty, { ...signal, totalScore: surgeAdjustedScore }, "initial");
+            await openPosition(code, name, result.limitPrice, qty, { ...surgeLearnedSignal, totalScore: surgeAdjustedScore }, "initial");
+            await recordTradeMemory({
+              code, name,
+              baseSignal: surgeBaseSignal,
+              learnedSignal: surgeLearnedSignal,
+              bonuses: { market: marketTrend.bonus, investor: surgeInvestor.bonus, snapshot: 0 },
+              adjustedScore: surgeAdjustedScore,
+              weightsSource: surgeWeightsSource,
+              positionSize: qty * result.limitPrice,
+            });
             tradeCount++;
           }
           await new Promise((r) => setTimeout(r, 200));
 
-        } else if (surgeAdjustedStrength === "weak" && signal.side === "buy") {
-          // DB에 승인 대기 신호 저장
+        } else if (surgeAdjustedStrength === "weak" && surgeLearnedSignal.side === "buy") {
           const priceData2 = await getPrice(config, code);
           const surgeName = priceData2?.hts_kor_isnm || code;
           try {
             await supabase.from("pending_signals").insert({
               stock_code: code, stock_name: surgeName,
               signal_score: surgeAdjustedScore,
-              signal_comment: `${signal.comment}${surgeInvestorTag}`,
-              signal_data: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount, institutionalBonus: surgeInvestor.bonus },
+              signal_comment: `${surgeLearnedSignal.comment}${surgeInvestorTag}`,
+              signal_data: { indicators: surgeLearnedSignal.indicators, raw: surgeLearnedSignal.raw, matchCount: surgeLearnedSignal.matchCount, institutionalBonus: surgeInvestor.bonus },
               source: "surge", status: "pending",
             });
           } catch { /* ignore */ }
 
           actions.push({
             type: "surge_pending", code, name: surgeName,
-            detail: `급등주 약한 ${surgeAdjustedScore}점${surgeInvestorTag} → DB 저장, 승인 대기. ${signal.comment}`,
+            detail: `급등주 약한 ${surgeAdjustedScore}점${surgeInvestorTag} → DB 저장, 승인 대기. ${surgeLearnedSignal.comment}`,
           });
           await new Promise((r) => setTimeout(r, 200));
         }
@@ -985,10 +1105,15 @@ async function runEngine(config: EngineConfig) {
       timestamp: new Date().toISOString(),
       tradeCount, scannedCount, durationMs, actions,
       learning: learning ? {
-        weightsSource: learning.weights.source,
-        riskSource: learning.risk.source,
-        sampleSize: learning.risk.sampleSize,
-        appliedRisk: { stopLoss, takeProfit, trailingStop, takeProfitRatio },
+        confidence: learning.confidence,
+        sampleSize: learning.sampleSize,
+        weightsSource: applied.weights ? "learned" : "default",
+        atrSource: learning.atrMultipliers.source,
+        applied: {
+          takeProfitRatio,
+          targetRiskAmount: applied.targetRiskAmount,
+          atrMultipliers: applied.atrMultipliers,
+        },
       } : null,
     });
   } catch (e: unknown) {
