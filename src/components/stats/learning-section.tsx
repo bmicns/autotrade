@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { COLORS } from "@/lib/constants";
 
 export interface LearningSnapshot {
@@ -27,6 +28,7 @@ interface LearningSectionProps {
   snapshot: LearningSnapshot | null;
   isExpired: boolean;
   history: LearningSnapshot[];
+  abStats?: { avgBase: number; avgLearned: number; sampleSize: number };
 }
 
 const CONF_LABELS: Record<string, { label: string; color: string; bg: string }> = {
@@ -42,7 +44,8 @@ const BASE_WEIGHTS = {
   ranging:  { RSI: 21, MACD: 13, 이동평균: 13, 볼린저: 21, 거래량: 17, 캔들패턴: 15 },
 };
 
-export function LearningSection({ snapshot, isExpired, history }: LearningSectionProps) {
+export function LearningSection({ snapshot, isExpired, history, abStats }: LearningSectionProps) {
+  const [activeRegime, setActiveRegime] = useState<"trending" | "ranging">("trending");
   const conf = snapshot?.confidence ?? "none";
   const confStyle = CONF_LABELS[conf] ?? CONF_LABELS.none;
 
@@ -135,11 +138,66 @@ export function LearningSection({ snapshot, isExpired, history }: LearningSectio
             ))}
           </div>
 
-          {/* ── 가중치 바 차트 (추세장 기준) ── */}
+          {/* ── A/B 비교 카드 ── */}
+          {abStats && (
+            <div style={{ margin: "0 16px 12px", padding: "12px 14px", borderRadius: 10, background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.dim }}>A/B 점수 비교 (최근 {abStats.sampleSize}건)</span>
+                {abStats.avgLearned > abStats.avgBase && (
+                  <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#DCFCE7", color: "#15803D", border: "1px solid #BBF7D0" }}>
+                    학습값 우세
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {[
+                  { label: "기본 점수 (A)", value: abStats.avgBase, color: COLORS.dim, bg: COLORS.line },
+                  { label: "학습 점수 (B)", value: abStats.avgLearned, color: "#1D4ED8", bg: "#DBEAFE" },
+                ].map((item) => (
+                  <div key={item.label} style={{ padding: "10px 12px", borderRadius: 8, background: item.bg, textAlign: "center" }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: item.color, display: "block" }}>{item.label}</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: item.color, fontVariantNumeric: "tabular-nums" }}>{item.value.toFixed(1)}</span>
+                    <span style={{ fontSize: 9, color: item.color, display: "block", marginTop: 2 }}>평균 점수</span>
+                  </div>
+                ))}
+              </div>
+              {abStats.avgLearned !== abStats.avgBase && (
+                <div style={{ marginTop: 8, textAlign: "center" }}>
+                  <span style={{ fontSize: 10, color: COLORS.dim }}>
+                    학습값이 기본값보다{" "}
+                    <span style={{ fontWeight: 700, color: abStats.avgLearned > abStats.avgBase ? "#15803D" : COLORS.rise }}>
+                      {Math.abs(abStats.avgLearned - abStats.avgBase).toFixed(1)}점 {abStats.avgLearned > abStats.avgBase ? "높음" : "낮음"}
+                    </span>
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── 가중치 바 차트 (trending / ranging 탭) ── */}
           {snapshot.weights_trending && (
             <div style={{ margin: "0 16px 12px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.dim }}>지표 가중치 (추세장)</span>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {(["trending", "ranging"] as const).map((regime) => {
+                    const hasData = regime === "trending" ? !!snapshot.weights_trending : !!snapshot.weights_ranging;
+                    if (!hasData && regime === "ranging") return null;
+                    return (
+                      <button
+                        key={regime}
+                        onClick={() => setActiveRegime(regime)}
+                        style={{
+                          padding: "3px 10px", borderRadius: 6, border: "none", cursor: "pointer",
+                          fontSize: 10, fontWeight: 700, fontFamily: "inherit",
+                          background: activeRegime === regime ? COLORS.hero : COLORS.sub,
+                          color: activeRegime === regime ? "#fff" : COLORS.dim,
+                        }}
+                      >
+                        {regime === "trending" ? "추세장" : "횡보장"}
+                      </button>
+                    );
+                  })}
+                </div>
                 <span style={{
                   fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
                   background: snapshot.weights_source === "learned" ? "#DCFCE7" : COLORS.sub,
@@ -150,8 +208,12 @@ export function LearningSection({ snapshot, isExpired, history }: LearningSectio
                 </span>
               </div>
               {WEIGHT_NAMES.map((name) => {
-                const base = BASE_WEIGHTS.trending[name as keyof typeof BASE_WEIGHTS.trending] ?? 0;
-                const learned = (snapshot.weights_trending as Record<string, number>)[name] ?? base;
+                const baseMap = BASE_WEIGHTS[activeRegime];
+                const base = baseMap[name as keyof typeof baseMap] ?? 0;
+                const weightsData = activeRegime === "trending"
+                  ? snapshot.weights_trending
+                  : (snapshot.weights_ranging ?? snapshot.weights_trending);
+                const learned = (weightsData as Record<string, number>)[name] ?? base;
                 return (
                   <div key={name} style={{ marginBottom: 6 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>

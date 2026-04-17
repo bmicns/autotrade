@@ -1,17 +1,14 @@
+import { supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { runLearning } from "@/lib/learning";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
 
-// GET /api/learn?history=N — 학습 결과 조회
+// GET /api/learn?history=N&recentTrades=N — 학습 결과 조회
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const historyN = parseInt(searchParams.get("history") ?? "0", 10);
+    const recentTradesN = parseInt(searchParams.get("recentTrades") ?? "0", 10);
 
     // 현재 활성 스냅샷 (만료 포함 최신)
     const { data: active } = await supabase
@@ -36,10 +33,28 @@ export async function GET(req: NextRequest) {
       history = histData ?? [];
     }
 
+    // A/B 비교용: 최근 N건 trade_memory에서 base_score / learned_score 평균
+    let abStats: { avgBase: number; avgLearned: number; sampleSize: number } | undefined;
+    if (recentTradesN > 0) {
+      const { data: trades } = await supabase
+        .from("trade_memory")
+        .select("base_score, learned_score")
+        .not("base_score", "is", null)
+        .not("learned_score", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(recentTradesN);
+      if (trades && trades.length > 0) {
+        const avgBase = trades.reduce((s, t) => s + (t.base_score ?? 0), 0) / trades.length;
+        const avgLearned = trades.reduce((s, t) => s + (t.learned_score ?? 0), 0) / trades.length;
+        abStats = { avgBase: Math.round(avgBase * 10) / 10, avgLearned: Math.round(avgLearned * 10) / 10, sampleSize: trades.length };
+      }
+    }
+
     return NextResponse.json({
       snapshot: active ?? null,
       isExpired,
       ...(history !== undefined ? { history } : {}),
+      ...(abStats !== undefined ? { abStats } : {}),
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "조회 실패" }, { status: 500 });
@@ -49,7 +64,8 @@ export async function GET(req: NextRequest) {
 // POST /api/learn — 학습 즉시 실행 (수동 트리거)
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET) return NextResponse.json({ error: "CRON_SECRET 미설정" }, { status: 500 });
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

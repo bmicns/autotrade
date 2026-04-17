@@ -1,628 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
-import { analyzeSignal, analyzeSignalWithWeights, calcATR, calcDynamicRisk, calcPositionSize, DEFAULT_ATR_MULTIPLIERS, checkRisk, type AtrMultipliers, type DailyCandle, type SignalResult } from "@/lib/kis/indicators";
-import { loadLatestLearning, applyLearning, type LearningResult } from "@/lib/learning";
-
-// ─── 투자자 동향 타입 ────────────────────────────
-interface InvestorTrend {
-  orgn: number;   // 기관 순매수 금액 (억원)
-  frgn: number;   // 외국인 순매수 금액 (억원)
-  bonus: number;  // 신호 보정 점수
-  label: string;  // 설명
-}
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
-
-interface EngineConfig {
-  appKey: string;
-  appSecret: string;
-  accountNo: string;
-  token: string;
-  stopLoss: number;
-  takeProfit: number;
-  trailingStop: number;
-  maxPerTrade: number;
-  maxDailyTrades: number;
-  takeProfitRatio: number;   // #1 익절 시 매도 비율 (0~100%)
-  dailyLossLimit: number;    // #5 일일 최대 손실 한도 (%)
-  maxHoldDays: number;       // 최대 보유 기간 (일)
-  dynamicRisk: boolean;      // #2 ATR 동적 손절 사용 여부
-  watchlist?: string[];
-}
-
-// ─── Supabase 포지션 관리 ────────────────────────
-async function openPosition(code: string, name: string | null, price: number, qty: number, signal: SignalResult, phase: "initial" | "full") {
-  try {
-    await supabase.from("positions").insert({
-      stock_code: code, stock_name: name,
-      entry_price: price, entry_qty: qty,
-      entry_signal: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount, totalScore: signal.totalScore },
-      signal_strength: signal.strength,
-      phase, status: "open",
-    });
-  } catch { /* ignore */ }
-}
-
-async function closePosition(code: string, exitPrice: number, exitQty: number, exitReason: string) {
-  try {
-    const { data } = await supabase.from("positions").select("*")
-      .eq("stock_code", code).eq("status", "open")
-      .order("entry_date", { ascending: true }).limit(1);
-    if (!data || data.length === 0) return;
-    const pos = data[0];
-    const entryPrice = Number(pos.entry_price);
-    const pnlAmount = (exitPrice - entryPrice) * exitQty;
-    const pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 : 0;
-    const holdDays = Math.max(1, Math.ceil((Date.now() - new Date(pos.entry_date).getTime()) / 86400000));
-
-    await supabase.from("positions").update({
-      exit_price: exitPrice, exit_qty: exitQty,
-      exit_date: new Date().toISOString(), exit_reason: exitReason,
-      pnl_amount: Math.round(pnlAmount),
-      pnl_percent: Math.round(pnlPercent * 100) / 100,
-      hold_days: holdDays, status: "closed",
-    }).eq("id", pos.id);
-  } catch { /* ignore */ }
-}
-
-// ─── trade_memory 헬퍼 ──────────────────────────
-function extractCandlePattern(signal: SignalResult): string {
-  const patternInd = signal.indicators.find((i) => i.name === "캔들패턴");
-  return patternInd?.value ?? "없음";
-}
-
-async function recordTradeMemory(params: {
-  code: string;
-  name: string;
-  baseSignal: SignalResult;
-  learnedSignal: SignalResult;
-  bonuses: { market: number; investor: number; snapshot: number };
-  adjustedScore: number;
-  weightsSource: "learned" | "default";
-  positionSize: number;
-}): Promise<void> {
-  try {
-    const raw = params.learnedSignal.raw;
-    await supabase.from("trade_memory").insert({
-      stock_code: params.code,
-      stock_name: params.name,
-      rsi_value: raw.rsi,
-      macd_histogram: raw.macd,
-      ma_cross: raw.macdCrossover === "golden" ? "golden" : raw.macdCrossover === "dead" ? "dead" : "none",
-      bb_position: raw.bbPosition,
-      volume_ratio: raw.volumeRatio,
-      adx_value: raw.adx,
-      candle_pattern: extractCandlePattern(params.learnedSignal),
-      regime: raw.regime,
-      base_score: params.baseSignal.totalScore,
-      learned_score: params.learnedSignal.totalScore,
-      total_score: params.adjustedScore,
-      market_bonus: params.bonuses.market,
-      investor_bonus: params.bonuses.investor,
-      snapshot_bonus: params.bonuses.snapshot,
-      weights_source: params.weightsSource,
-      atr_value: raw.atr,
-      position_size: params.positionSize,
-    });
-  } catch { /* ignore */ }
-}
-
-async function closeTradeMemory(
-  code: string,
-  pnlPercent: number,
-  pnlAmount: number,
-  holdDays: number,
-  exitReason: string
-): Promise<void> {
-  try {
-    await supabase.from("trade_memory")
-      .update({
-        pnl_percent: Math.round(pnlPercent * 100) / 100,
-        pnl_amount: Math.round(pnlAmount),
-        hold_days: holdDays,
-        exit_reason: exitReason,
-        is_win: pnlAmount > 0,
-        closed_at: new Date().toISOString(),
-      })
-      .eq("stock_code", code)
-      .is("closed_at", null)
-      .order("created_at", { ascending: false });
-  } catch { /* ignore */ }
-}
-
-async function getOpenPosition(code: string) {
-  try {
-    const { data } = await supabase.from("positions").select("*")
-      .eq("stock_code", code).eq("status", "open").limit(1);
-    return data?.[0] || null;
-  } catch { return null; }
-}
-
-// #5 일일 실현 손실 합산
-async function getTodayRealizedLoss(): Promise<number> {
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-    const { data } = await supabase.from("positions").select("pnl_percent")
-      .eq("status", "closed").gte("exit_date", today);
-    if (!data) return 0;
-    return data.reduce((s, p) => s + (Number(p.pnl_percent) || 0), 0);
-  } catch { return 0; }
-}
-
-async function logEngineRun(tradeCount: number, actions: unknown[], scannedCount: number, durationMs: number, error?: string) {
-  try {
-    await supabase.from("engine_runs").insert({
-      trade_count: tradeCount, actions, scanned_count: scannedCount,
-      duration_ms: durationMs, error: error || null,
-    });
-  } catch { /* ignore */ }
-}
-
-// ─── #6 급등주 탐색 (KOSPI + KOSDAQ) ────────────
-async function scanSurgeStocks(config: EngineConfig): Promise<string[]> {
-  const codes = new Set<string>();
-  const markets = ["J", "Q"]; // J=KOSPI, Q=KOSDAQ (#6)
-
-  for (const mkt of markets) {
-    // 등락률 상위
-    try {
-      const params = new URLSearchParams({
-        fid_cond_mrkt_div_code: mkt, fid_cond_scr_div_code: "20170",
-        fid_input_iscd: mkt === "J" ? "0001" : "1001",
-        fid_rank_sort_cls_code: "0", fid_input_cnt_1: "0", fid_input_cnt_2: "",
-        fid_div_cls_code: "0", fid_trgt_cls_code: "0", fid_trgt_exls_cls_code: "0",
-        fid_input_price_1: "", fid_input_price_2: "", fid_vol_cnt: "", fid_input_date_1: "",
-      });
-      const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`, {
-        headers: headers(config, "FHPST01700000"),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        for (const item of (data.output || []).slice(0, 20)) {
-          const code = item.stck_shrn_iscd || item.mksc_shrn_iscd;
-          if (code && (Number(item.prdy_ctrt) || 0) >= 3) codes.add(code);
-        }
-      }
-    } catch { /* ignore */ }
-
-    // 거래량 상위
-    try {
-      const params = new URLSearchParams({
-        fid_cond_mrkt_div_code: mkt, fid_cond_scr_div_code: "20171",
-        fid_input_iscd: mkt === "J" ? "0001" : "1001",
-        fid_rank_sort_cls_code: "0", fid_input_cnt_1: "0", fid_input_cnt_2: "",
-        fid_div_cls_code: "0", fid_trgt_cls_code: "0", fid_trgt_exls_cls_code: "0",
-        fid_input_price_1: "", fid_input_price_2: "", fid_vol_cnt: "", fid_input_date_1: "",
-      });
-      const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`, {
-        headers: headers(config, "FHPST01700000"),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        for (const item of (data.output || []).slice(0, 15)) {
-          const code = item.stck_shrn_iscd || item.mksc_shrn_iscd;
-          if (code) codes.add(code);
-        }
-      }
-    } catch { /* ignore */ }
-
-    await new Promise((r) => setTimeout(r, 200));
-  }
-
-  return Array.from(codes);
-}
-
-// ─── KIS API 유틸 ───────────────────────────────
-function headers(config: EngineConfig, trId: string) {
-  return {
-    "Content-Type": "application/json; charset=utf-8",
-    authorization: `Bearer ${config.token}`,
-    appkey: config.appKey, appsecret: config.appSecret, tr_id: trId,
-  };
-}
-
-async function getPrice(config: EngineConfig, code: string) {
-  const params = new URLSearchParams({ fid_cond_mrkt_div_code: "J", fid_input_iscd: code });
-  const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`, {
-    headers: headers(config, KIS_TR.PRICE),
-  });
-  if (!res.ok) return null;
-  return (await res.json()).output;
-}
-
-// ─── DART 공시 필터 ──────────────────────────────
-async function hasDangerousDisclosure(code: string): Promise<{ danger: boolean; reason: string }> {
-  const apiKey = process.env.DART_API_KEY;
-  if (!apiKey) return { danger: false, reason: "" };
-  try {
-    // 최근 30일 공시 조회
-    const endDate = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10).replace(/-/g, "");
-    const startDate = new Date(Date.now() + 9 * 3600000 - 30 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
-    const params = new URLSearchParams({
-      crtfc_key: apiKey,
-      corp_code: code,   // 실제론 corp_code 필요하나 stock_code로 조회 시도
-      bgn_de: startDate,
-      end_de: endDate,
-      page_count: "20",
-    });
-    // stock_code 기준 조회
-    const params2 = new URLSearchParams({
-      crtfc_key: apiKey,
-      stock_code: code,
-      bgn_de: startDate,
-      end_de: endDate,
-      page_count: "20",
-    });
-    const res = await fetch(`https://opendart.fss.or.kr/api/list.json?${params2}`, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-    if (!res.ok) return { danger: false, reason: "" };
-    const data = await res.json();
-    if (data.status !== "000") return { danger: false, reason: "" };
-
-    // 위험 공시 키워드
-    const DANGER_KEYWORDS = [
-      "유상증자", "전환사채", "신주인수권", "감사의견 거절", "감사의견 한정",
-      "영업정지", "상장폐지", "횡령", "배임", "불성실공시",
-    ];
-    const disclosures: Array<{ report_nm: string }> = data.list || [];
-    for (const d of disclosures) {
-      const matched = DANGER_KEYWORDS.find((kw) => d.report_nm.includes(kw));
-      if (matched) return { danger: true, reason: `공시: ${matched} (${d.report_nm.slice(0, 30)})` };
-    }
-    return { danger: false, reason: "" };
-  } catch {
-    return { danger: false, reason: "" };
-  }
-}
-
-// ─── 종목 기본정보 (상장일) ──────────────────────
-async function getListingDate(config: EngineConfig, code: string): Promise<string> {
-  try {
-    const params = new URLSearchParams({ PDNO: code, PRDT_TYPE_CD: "300" });
-    const res = await fetch(
-      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/search-stock-info?${params}`,
-      { headers: headers(config, "CTPF1002R") },
-    );
-    if (!res.ok) return "";
-    const data = await res.json();
-    return (data.output?.lstg_dt as string) || "";
-  } catch {
-    return "";
-  }
-}
-
-// ─── 종목 필터 ───────────────────────────────────
-interface FilterResult {
-  passed: boolean;
-  reason: string;
-}
-
-function applyStockFilter(priceData: Record<string, string>, listingDate: string): FilterResult {
-  const reasons: string[] = [];
-
-  // 1. 시가총액 500억 이상 (hts_avls 단위: 억원, 없으면 통과)
-  const marketCap = Number(priceData.hts_avls || 0);
-  if (marketCap > 0 && marketCap < 500) {
-    reasons.push(`시가총액 ${marketCap}억 (500억 미만)`);
-  }
-
-  // 2. 시장경고 정상만 허용 (00=정상, 01=주의, 02=경고, 03=위험)
-  const warnCode = priceData.mrkt_warn_cls_code || "00";
-  if (warnCode !== "00") {
-    const warnLabel: Record<string, string> = { "01": "투자주의", "02": "투자경고", "03": "투자위험" };
-    reasons.push(`시장경고(${warnLabel[warnCode] ?? warnCode})`);
-  }
-
-  // 3. 정리매매 종목 제외
-  if (priceData.sltr_yn === "Y") {
-    reasons.push("정리매매 종목");
-  }
-
-  // 4. 상장 1년 이상 (listingDate=YYYYMMDD, 조회 실패 시 스킵)
-  if (listingDate.length === 8) {
-    const listed = new Date(
-      `${listingDate.slice(0, 4)}-${listingDate.slice(4, 6)}-${listingDate.slice(6, 8)}`,
-    );
-    const oneYearAgo = new Date(Date.now() - 365 * 86400000);
-    if (listed > oneYearAgo) {
-      const months = Math.floor((Date.now() - listed.getTime()) / (30 * 86400000));
-      reasons.push(`상장 ${months}개월 (1년 미만)`);
-    }
-  }
-
-  return { passed: reasons.length === 0, reason: reasons.join(", ") };
-}
-
-async function getDailyCandles(config: EngineConfig, code: string): Promise<DailyCandle[]> {
-  const params = new URLSearchParams({
-    fid_cond_mrkt_div_code: "J", fid_input_iscd: code,
-    fid_input_date_1: "", fid_input_date_2: "",
-    fid_period_div_code: "D", fid_org_adj_prc: "0",
-  });
-  const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?${params}`, {
-    headers: headers(config, "FHKST03010100"),
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return (data.output2 || []).map((d: Record<string, string>) => ({
-    date: d.stck_bsop_date, close: Number(d.stck_clpr) || 0,
-    open: Number(d.stck_oprc) || 0, high: Number(d.stck_hgpr) || 0,
-    low: Number(d.stck_lwpr) || 0, volume: Number(d.acml_vol) || 0,
-  })).reverse();
-}
-
-async function getBalance(config: EngineConfig) {
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
-  const params = new URLSearchParams({
-    CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
-    AFHR_FLPR_YN: "N", OFL_YN: "", INQR_DVSN: "02", UNPR_DVSN: "01",
-    FUND_STTL_ICLD_YN: "N", FNCG_AMT_AUTO_RDPT_YN: "N", PRCS_DVSN: "00",
-    CTX_AREA_FK100: "", CTX_AREA_NK100: "",
-  });
-  const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`, {
-    headers: headers(config, KIS_TR.BALANCE),
-  });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-interface OrderResult {
-  success: boolean;
-  msg: string;
-  ordNo?: string;
-  raw?: Record<string, unknown>;
-}
-
-async function executeOrder(config: EngineConfig, trId: string, code: string, qty: number, side: "buy" | "sell"): Promise<OrderResult> {
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
-  try {
-    const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
-      method: "POST", headers: headers(config, trId),
-      body: JSON.stringify({ CANO: cano, ACNT_PRDT_CD: acntPrdtCd, PDNO: code, ORD_DVSN: "01", ORD_QTY: String(qty), ORD_UNPR: "0" }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "응답 없음");
-      return { success: false, msg: `HTTP ${res.status}: ${text.slice(0, 200)}` };
-    }
-
-    const data = await res.json();
-    const rtCd = data.rt_cd;  // "0" = 성공
-    const msg = data.msg1 || data.msg || "응답 없음";
-
-    if (rtCd === "0") {
-      return { success: true, msg, ordNo: data.output?.ODNO, raw: data };
-    }
-    return { success: false, msg: `[${rtCd}] ${msg}`, raw: data };
-  } catch (e: unknown) {
-    const errMsg = e instanceof Error ? e.message : "네트워크 오류";
-    return { success: false, msg: errMsg };
-  }
-}
-
-async function sellOrder(config: EngineConfig, code: string, qty: number): Promise<OrderResult> {
-  return executeOrder(config, KIS_TR.SELL, code, qty, "sell");
-}
-
-async function buyOrder(config: EngineConfig, code: string, qty: number): Promise<OrderResult> {
-  return executeOrder(config, KIS_TR.BUY, code, qty, "buy");
-}
-
-// ─── 호가 단위 반올림 (KRX 기준) ────────────────
-function roundToTick(price: number): number {
-  if (price < 1000)    return Math.round(price);
-  if (price < 5000)    return Math.round(price / 5) * 5;
-  if (price < 10000)   return Math.round(price / 10) * 10;
-  if (price < 50000)   return Math.round(price / 50) * 50;
-  if (price < 100000)  return Math.round(price / 100) * 100;
-  if (price < 500000)  return Math.round(price / 500) * 500;
-  return Math.round(price / 1000) * 1000;
-}
-
-// ─── 지정가 매수 (현재가 -0.5%) ─────────────────
-async function limitBuyOrder(config: EngineConfig, code: string, qty: number, currentPrice: number): Promise<OrderResult & { limitPrice: number }> {
-  const limitPrice = roundToTick(currentPrice * 0.995);
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
-  try {
-    const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
-      method: "POST", headers: headers(config, KIS_TR.BUY),
-      body: JSON.stringify({
-        CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
-        PDNO: code, ORD_DVSN: "00",          // 지정가
-        ORD_QTY: String(qty), ORD_UNPR: String(limitPrice),
-      }),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "응답 없음");
-      return { success: false, msg: `HTTP ${res.status}: ${text.slice(0, 200)}`, limitPrice };
-    }
-    const data = await res.json();
-    if (data.rt_cd === "0") {
-      return { success: true, msg: data.msg1 || "성공", ordNo: data.output?.ODNO, raw: data, limitPrice };
-    }
-    return { success: false, msg: `[${data.rt_cd}] ${data.msg1 || data.msg}`, raw: data, limitPrice };
-  } catch (e: unknown) {
-    return { success: false, msg: e instanceof Error ? e.message : "네트워크 오류", limitPrice };
-  }
-}
-
-// ─── 미체결 매수 주문 조회 ───────────────────────
-interface OpenOrder {
-  odno: string;
-  orgn_odno: string;
-  ord_gno_brno: string;
-  pdno: string;
-  rmn_qty: string;
-}
-
-async function getOpenBuyOrders(config: EngineConfig): Promise<OpenOrder[]> {
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
-  try {
-    const params = new URLSearchParams({
-      CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
-      CTX_AREA_FK100: "", CTX_AREA_NK100: "",
-      INQR_DVSN_1: "", INQR_DVSN_2: "0",
-      PRDT_TYPE_CD: "300", SLL_BUY_DVSN_CD: "02",  // 02=매수
-    });
-    const res = await fetch(
-      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl?${params}`,
-      { headers: headers(config, KIS_TR.OPEN_ORDERS) },
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.output || []) as OpenOrder[];
-  } catch {
-    return [];
-  }
-}
-
-// ─── 미체결 주문 취소 ────────────────────────────
-async function cancelOpenBuyOrders(config: EngineConfig): Promise<{ cancelled: number; failed: number }> {
-  const orders = await getOpenBuyOrders(config);
-  let cancelled = 0, failed = 0;
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
-
-  for (const ord of orders) {
-    const rmn = Number(ord.rmn_qty || 0);
-    if (rmn <= 0) continue;
-    try {
-      const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-rvsecncl`, {
-        method: "POST", headers: headers(config, KIS_TR.CANCEL),
-        body: JSON.stringify({
-          CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
-          KRX_FWDG_ORD_ORGNO: ord.ord_gno_brno,
-          ORGN_ODNO: ord.odno,
-          ORD_DVSN: "00", RVSE_CNCL_DVSN_CD: "02",  // 취소
-          ORD_QTY: String(rmn), ORD_UNPR: "0", QTY_ALL_ORD_YN: "Y",
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && (data as Record<string, string>).rt_cd === "0") cancelled++;
-      else failed++;
-    } catch {
-      failed++;
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return { cancelled, failed };
-}
-
-// ─── 시장 전체 지수 모멘텀 (B안: KOSPI + KOSDAQ) ────
-interface MarketTrend {
-  kospiRate: number;
-  kosdaqRate: number;
-  bonus: number;
-  label: string;
-}
-
-async function getMarketTrend(config: EngineConfig): Promise<MarketTrend> {
-  const fallback: MarketTrend = { kospiRate: 0, kosdaqRate: 0, bonus: 0, label: "" };
-  try {
-    const fetchIndex = async (iscd: string) => {
-      const params = new URLSearchParams({ fid_cond_mrkt_div_code: "U", fid_input_iscd: iscd });
-      const res = await fetch(
-        `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-price?${params}`,
-        { headers: headers(config, "FHPUP02100000") },
-      );
-      if (!res.ok) return 0;
-      const data = await res.json();
-      return Number(data.output?.prdy_ctrt || 0);
-    };
-
-    const [kospiRate, kosdaqRate] = await Promise.all([
-      fetchIndex("0001"),  // KOSPI
-      fetchIndex("1001"),  // KOSDAQ
-    ]);
-
-    // 두 지수 평균으로 시장 방향 판단
-    const avgRate = (kospiRate + kosdaqRate) / 2;
-
-    let bonus = 0;
-    let label = "";
-    if (avgRate >= 1.0) {
-      bonus = 15; label = `시장 강세 (KOSPI ${kospiRate.toFixed(1)}% KOSDAQ ${kosdaqRate.toFixed(1)}%)`;
-    } else if (avgRate >= 0.3) {
-      bonus = 8;  label = `시장 상승 (KOSPI ${kospiRate.toFixed(1)}% KOSDAQ ${kosdaqRate.toFixed(1)}%)`;
-    } else if (avgRate <= -1.0) {
-      bonus = -20; label = `시장 급락 (KOSPI ${kospiRate.toFixed(1)}% KOSDAQ ${kosdaqRate.toFixed(1)}%)`;
-    } else if (avgRate <= -0.3) {
-      bonus = -10; label = `시장 하락 (KOSPI ${kospiRate.toFixed(1)}% KOSDAQ ${kosdaqRate.toFixed(1)}%)`;
-    }
-
-    return { kospiRate, kosdaqRate, bonus, label };
-  } catch {
-    return fallback;
-  }
-}
-
-// ─── 투자자별 매매동향 조회 (기관/외국인) ───────────
-async function getInvestorTrend(config: EngineConfig, code: string): Promise<InvestorTrend> {
-  const fallback: InvestorTrend = { orgn: 0, frgn: 0, bonus: 0, label: "" };
-  try {
-    const today = new Date(Date.now() + 9 * 3600000);
-    const end = today.toISOString().slice(0, 10).replace(/-/g, "");
-    const start = new Date(today.getTime() - 5 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
-
-    const params = new URLSearchParams({
-      fid_cond_mrkt_div_code: "J",
-      fid_input_iscd: code,
-      fid_input_date_1: start,
-      fid_input_date_2: end,
-    });
-    const res = await fetch(
-      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-investor?${params}`,
-      { headers: headers(config, KIS_TR.INVESTOR_TREND) },
-    );
-    if (!res.ok) return fallback;
-
-    const data = await res.json();
-    const rows: Record<string, string>[] = data.output || [];
-    if (rows.length === 0) return fallback;
-
-    // 최근 3일 합산 (단위: 백만원 → 억원)
-    const recent = rows.slice(0, 3);
-    const orgn = recent.reduce((s, r) => s + (Number(r.orgn_ntby_tr_pbmn) || 0), 0) / 100;
-    const frgn = recent.reduce((s, r) => s + (Number(r.frgn_ntby_tr_pbmn) || 0), 0) / 100;
-
-    // 보너스 점수 계산
-    let bonus = 0;
-    let label = "";
-
-    if (orgn > 0 && frgn > 0) {
-      bonus = 25;
-      label = `기관+외국인 동반매수 (기관 ${orgn.toFixed(0)}억, 외국인 ${frgn.toFixed(0)}억)`;
-    } else if (orgn > 0) {
-      bonus = 15;
-      label = `기관 순매수 ${orgn.toFixed(0)}억`;
-    } else if (frgn > 0) {
-      bonus = 10;
-      label = `외국인 순매수 ${frgn.toFixed(0)}억`;
-    } else if (orgn < 0 && frgn < 0) {
-      bonus = -25;
-      label = `기관+외국인 동반매도 (기관 ${orgn.toFixed(0)}억, 외국인 ${frgn.toFixed(0)}억)`;
-    } else if (orgn < 0) {
-      bonus = -15;
-      label = `기관 순매도 ${orgn.toFixed(0)}억`;
-    } else if (frgn < 0) {
-      bonus = -10;
-      label = `외국인 순매도 ${frgn.toFixed(0)}억`;
-    }
-
-    return { orgn, frgn, bonus, label };
-  } catch {
-    return fallback;
-  }
-}
+import { analyzeSignal, analyzeSignalWithWeights, calcATR, calcDynamicRisk, calcPositionSize, checkRisk, type AtrMultipliers, type SignalResult } from "@/lib/kis/indicators";
+import { loadLatestLearning, applyLearning } from "@/lib/learning";
+import { KIS_VTS_BASE } from "@/lib/constants";
+import { type EngineConfig } from "@/lib/engine/types";
+import { openPosition, closePosition, recordTradeMemory, closeTradeMemory, getOpenPosition, getTodayRealizedLoss, logEngineRun } from "@/lib/engine/db";
+import { supabase } from "@/lib/supabase/api-client";
+import { getPrice, getDailyCandles, getBalance, sellOrder, limitBuyOrder, cancelOpenBuyOrders } from "@/lib/engine/kis";
+import { hasDangerousDisclosure, getListingDate, applyStockFilter } from "@/lib/engine/filters";
+import { getMarketTrend, getInvestorTrend, scanSurgeStocks } from "@/lib/engine/market";
 
 // ─── Cron GET ───────────────────────────────────
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET) return NextResponse.json({ error: "CRON_SECRET 미설정" }, { status: 500 });
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -639,23 +30,31 @@ export async function GET(req: NextRequest) {
   const kstTime = kstHour * 100 + kstMin;
   const inSession = (kstTime >= 930 && kstTime <= 1150) || (kstTime >= 1250 && kstTime <= 1510);
   if (!inSession) {
-    // skip도 기록하여 cron 실행 여부 추적
     await logEngineRun(0, [{ type: "skipped", code: "", detail: `장 외 시간 (KST ${kstHour}:${String(kstMin).padStart(2, "0")})` }], 0, 0);
     return NextResponse.json({ skipped: true, reason: `장 외 시간 (KST ${kstHour}:${String(kstMin).padStart(2, "0")})` });
   }
 
+  // 환경변수에 trailing \n 제거 (Vercel env pull 포맷 버그 대응)
+  const cleanAppKey = appKey.replace(/\\n|\n/g, "").trim();
+  const cleanAppSecret = appSecret.replace(/\\n|\n/g, "").trim();
+  const cleanAccountNo = accountNo.replace(/\\n|\n/g, "").trim();
+
   const tokenRes = await fetch(`${KIS_VTS_BASE}/oauth2/tokenP`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ grant_type: "client_credentials", appkey: appKey, appsecret: appSecret }),
+    body: JSON.stringify({ grant_type: "client_credentials", appkey: cleanAppKey, appsecret: cleanAppSecret }),
   });
-  if (!tokenRes.ok) return NextResponse.json({ error: "토큰 발급 실패" }, { status: 500 });
+  if (!tokenRes.ok) {
+    const errBody = await tokenRes.text().catch(() => "");
+    await logEngineRun(0, [{ type: "token_error", code: "", detail: `KIS 토큰 발급 실패: ${tokenRes.status} ${errBody.slice(0, 200)}` }], 0, 0, "토큰 발급 실패");
+    return NextResponse.json({ error: "토큰 발급 실패" }, { status: 500 });
+  }
   const tokenData = await tokenRes.json();
 
   const { data: watchlistData } = await supabase.from("watchlist").select("code").eq("active", true);
   const watchlist = (watchlistData || []).map((w: { code: string }) => w.code);
 
   const config: EngineConfig = {
-    appKey, appSecret, accountNo, token: tokenData.access_token,
+    appKey: cleanAppKey, appSecret: cleanAppSecret, accountNo: cleanAccountNo, token: tokenData.access_token,
     stopLoss: -5, takeProfit: 5, trailingStop: -3,
     maxPerTrade: 1000000, maxDailyTrades: 5,
     takeProfitRatio: 50,   // #1
@@ -682,25 +81,22 @@ async function runEngine(config: EngineConfig) {
   let scannedCount = 0;
 
   try {
-    // ── 자가 학습: 최신 스냅샷 로딩 (매 실행마다 학습 X, 주 1회 별도 Cron에서 학습) ──
-    let learning: LearningResult | null = null;
+    // ── 자가 학습: 최신 스냅샷 로딩 ──
+    let learning = null;
     try { learning = await loadLatestLearning(); } catch { /* 학습 로딩 실패 시 기본값 사용 */ }
 
-    // 신뢰도 등급별 학습 적용 범위 차등화
     const applied = applyLearning(learning, config);
 
     const maxPerTrade = config.maxPerTrade ?? 1000000;
     const maxDailyTrades = config.maxDailyTrades ?? 5;
     const takeProfitRatio = applied.takeProfitRatio;
     const dailyLossLimit = config.dailyLossLimit ?? -3;
-
-    // 학습된 가중치 (신뢰도 medium+ 일 때만 적용)
     const customWeights = applied.weights;
 
     const actions: Array<{ type: string; code: string; name?: string; detail: string }> = [];
     let tradeCount = 0;
 
-    // ═══ STEP 0: 전 회차 미체결 매수 주문 취소 + 시장 모멘텀 조회 ═══
+    // ═══ STEP 0: 미체결 취소 + 시장 모멘텀 ═══
     const [cancelResult, marketTrend] = await Promise.all([
       cancelOpenBuyOrders(config),
       getMarketTrend(config),
@@ -737,7 +133,7 @@ async function runEngine(config: EngineConfig) {
       const highPrice = Number(h.stck_hgpr) || currentPrice;
       const name = h.prdt_name || code;
 
-      // #2 ATR 동적 손절 — 루프 내 독립 계산 (스코프 버그 해소)
+      // #2 ATR 동적 손절
       const holdAtrMultipliers: AtrMultipliers = applied.atrMultipliers;
       let holdStopLoss = config.stopLoss ?? -5;
       let holdTakeProfit = config.takeProfit ?? 5;
@@ -784,7 +180,7 @@ async function runEngine(config: EngineConfig) {
       }
 
       if (risk.action !== "hold") {
-        // #1 분할 매도: 익절 시 takeProfitRatio%만 매도, 나머지는 트레일링
+        // #1 분할 매도: 익절 시 takeProfitRatio%만 매도
         let sellQty = qty;
         if (risk.action === "take_profit" && takeProfitRatio < 100) {
           sellQty = Math.max(1, Math.floor(qty * takeProfitRatio / 100));
@@ -828,7 +224,6 @@ async function runEngine(config: EngineConfig) {
       const name = priceData?.hts_kor_isnm || sig.stock_name || sig.stock_code;
       if (price <= 0) continue;
 
-      // qty_override가 있으면 우선 사용 (수동 지정 수량)
       const qtyOverride = sig.signal_data?.qty_override ? Number(sig.signal_data.qty_override) : 0;
       const qty = qtyOverride > 0 ? qtyOverride : Math.floor((maxPerTrade * 0.5) / price);
       if (qty <= 0) continue;
@@ -847,7 +242,6 @@ async function runEngine(config: EngineConfig) {
         tradeCount++;
       }
 
-      // 처리 완료 → expired로 변경
       await supabase.from("pending_signals").update({ status: "expired", resolved_at: new Date().toISOString() }).eq("id", sig.id);
       await new Promise((r) => setTimeout(r, 200));
     }
@@ -864,10 +258,10 @@ async function runEngine(config: EngineConfig) {
       const snap = snapshotMap.get(code);
       if (!snap || snap.open_price <= 0) return 0;
       const gap = (snap.snapshot_price - snap.open_price) / snap.open_price;
-      if (gap > 0.01 && snap.snapshot_volume > 50000) return 15;  // +1% 이상 & 거래량 동반 → 강한 가산
-      if (gap > 0.005) return 8;   // +0.5% 완만 상승
-      if (gap < -0.02) return -20; // -2% 급락 → 매수 회피
-      if (gap < -0.01) return -10; // -1% 하락 추세
+      if (gap > 0.01 && snap.snapshot_volume > 50000) return 15;
+      if (gap > 0.005) return 8;
+      if (gap < -0.02) return -20;
+      if (gap < -0.01) return -10;
       return 0;
     }
 
@@ -882,19 +276,12 @@ async function runEngine(config: EngineConfig) {
       scannedCount++;
       if (candles.length < 26) continue;
 
-      // [A] 기본 가중치 점수 (항상 계산)
       const baseSignal = analyzeSignal(candles);
-      // [B] 학습 가중치 점수 (가중치 있을 때만, 없으면 baseSignal 재사용)
-      const learnedSignal = customWeights
-        ? analyzeSignalWithWeights(candles, customWeights)
-        : baseSignal;
+      const learnedSignal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : baseSignal;
 
-      // 장 초반 흐름 보너스
       const openingBonus = getOpeningBonus(code);
-      // 기관/외국인 투자자 동향 보너스
       const investor = await getInvestorTrend(config, code);
       const totalBonus = openingBonus + investor.bonus + marketTrend.bonus;
-      // 매수 결정은 learnedSignal 기준
       const adjustedScore = learnedSignal.totalScore + totalBonus;
       const adjustedStrength = adjustedScore >= 70 ? "strong" : adjustedScore >= 40 ? "weak" : "none";
       const weightsSource: "learned" | "default" = customWeights ? "learned" : "default";
@@ -911,7 +298,6 @@ async function runEngine(config: EngineConfig) {
         const name = priceData?.hts_kor_isnm || code;
         if (price <= 0) continue;
 
-        // ── 종목 필터 검사 ──
         const listingDate = await getListingDate(config, code);
         await new Promise((r) => setTimeout(r, 200));
         const filter = applyStockFilter(priceData as Record<string, string>, listingDate);
@@ -920,7 +306,6 @@ async function runEngine(config: EngineConfig) {
           continue;
         }
 
-        // ── DART 위험 공시 체크 ──
         const dart = await hasDangerousDisclosure(code);
         await new Promise((r) => setTimeout(r, 200));
         if (dart.danger) {
@@ -928,7 +313,6 @@ async function runEngine(config: EngineConfig) {
           continue;
         }
 
-        // 포지션 사이징: ATR 기반 투자금액 (변동성 역비례)
         const existingPos = await getOpenPosition(code);
         const buyRatio = existingPos?.phase === "initial" ? 1 : 0.5;
         const positionSize = calcPositionSize(
@@ -955,12 +339,9 @@ async function runEngine(config: EngineConfig) {
           if (!existingPos) {
             await openPosition(code, name, result.limitPrice, qty, { ...learnedSignal, totalScore: adjustedScore }, "initial");
             await recordTradeMemory({
-              code, name,
-              baseSignal,
-              learnedSignal,
+              code, name, baseSignal, learnedSignal,
               bonuses: { market: marketTrend.bonus, investor: investor.bonus, snapshot: openingBonus },
-              adjustedScore,
-              weightsSource,
+              adjustedScore, weightsSource,
               positionSize: qty * result.limitPrice,
             });
           }
@@ -1003,12 +384,8 @@ async function runEngine(config: EngineConfig) {
         scannedCount++;
         if (candles.length < 26) continue;
 
-        // [A] 기본 가중치 / [B] 학습 가중치
         const surgeBaseSignal = analyzeSignal(candles);
-        const surgeLearnedSignal = customWeights
-          ? analyzeSignalWithWeights(candles, customWeights)
-          : surgeBaseSignal;
-        // 기관/외국인 + 시장 모멘텀 보너스
+        const surgeLearnedSignal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : surgeBaseSignal;
         const surgeInvestor = await getInvestorTrend(config, code);
         const surgeAdjustedScore = surgeLearnedSignal.totalScore + surgeInvestor.bonus + marketTrend.bonus;
         const surgeAdjustedStrength = surgeAdjustedScore >= 70 ? "strong" : surgeAdjustedScore >= 40 ? "weak" : "none";
@@ -1025,7 +402,6 @@ async function runEngine(config: EngineConfig) {
           const name = priceData?.hts_kor_isnm || code;
           if (price <= 0) continue;
 
-          // ── 종목 필터 검사 ──
           const surgeListing = await getListingDate(config, code);
           await new Promise((r) => setTimeout(r, 200));
           const surgeFilter = applyStockFilter(priceData as Record<string, string>, surgeListing);
@@ -1034,7 +410,6 @@ async function runEngine(config: EngineConfig) {
             continue;
           }
 
-          // ── DART 위험 공시 체크 ──
           const surgeDart = await hasDangerousDisclosure(code);
           await new Promise((r) => setTimeout(r, 200));
           if (surgeDart.danger) {
@@ -1042,7 +417,6 @@ async function runEngine(config: EngineConfig) {
             continue;
           }
 
-          // 포지션 사이징: ATR 기반 (급등주는 50% 상한)
           const surgePositionSize = calcPositionSize(
             surgeLearnedSignal.raw.atr,
             price,
@@ -1065,11 +439,9 @@ async function runEngine(config: EngineConfig) {
             await openPosition(code, name, result.limitPrice, qty, { ...surgeLearnedSignal, totalScore: surgeAdjustedScore }, "initial");
             await recordTradeMemory({
               code, name,
-              baseSignal: surgeBaseSignal,
-              learnedSignal: surgeLearnedSignal,
+              baseSignal: surgeBaseSignal, learnedSignal: surgeLearnedSignal,
               bonuses: { market: marketTrend.bonus, investor: surgeInvestor.bonus, snapshot: 0 },
-              adjustedScore: surgeAdjustedScore,
-              weightsSource: surgeWeightsSource,
+              adjustedScore: surgeAdjustedScore, weightsSource: surgeWeightsSource,
               positionSize: qty * result.limitPrice,
             });
             tradeCount++;

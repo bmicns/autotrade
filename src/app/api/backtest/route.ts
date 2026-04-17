@@ -1,13 +1,9 @@
+import { supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { KIS_VTS_BASE } from "@/lib/constants";
 import { runBacktest } from "@/lib/backtest";
 import type { DailyCandle } from "@/lib/kis/indicators";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
 
 export const maxDuration = 30;
 

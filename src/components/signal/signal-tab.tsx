@@ -1,79 +1,28 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { COLORS } from "@/lib/constants";
 import { useAppStore } from "@/lib/store";
-
-interface WatchlistItem {
-  id: string;
-  code: string;
-  name: string | null;
-  active: boolean;
-}
-
-interface PendingSignal {
-  id: string;
-  stock_code: string;
-  stock_name: string | null;
-  signal_score: number;
-  signal_comment: string;
-  source: string;
-  status: string;
-  created_at: string;
-}
-
-interface FilterLog {
-  stock_code: string;
-  stock_name?: string;
-  action_type: string;
-  reason: string;
-  run_at: string;
-}
+import { useWatchlist } from "@/hooks/useWatchlist";
+import { usePendingSignals } from "@/hooks/usePendingSignals";
 
 export function SignalTab() {
   const kisConnected = useAppStore((s) => s.kisConnected);
   const kisConfig = useAppStore((s) => s.kisConfig);
   const [tab, setTab] = useState<"signals" | "watchlist">("signals");
-  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
-  const [signals, setSignals] = useState<PendingSignal[]>([]);
-  const [filterLogs, setFilterLogs] = useState<FilterLog[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ code: string; name: string; market: string }[]>([]);
   const [searching, setSearching] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [dartCodes, setDartCodes] = useState<Set<string>>(new Set());
 
-  const fetchWatchlist = useCallback(async () => {
-    try {
-      const res = await fetch("/api/watchlist");
-      if (res.ok) setWatchlist(await res.json());
-    } catch { /* ignore */ }
-  }, []);
-
-  const fetchSignals = useCallback(async () => {
-    try {
-      const res = await fetch("/api/pending-signals");
-      if (res.ok) setSignals(await res.json());
-    } catch { /* ignore */ }
-  }, []);
+  const { watchlist, loading, fetchWatchlist, addItem, removeItem } = useWatchlist();
+  const { signals, filterLogs, dartCodes, fetchSignals, fetchEngineLog, expireSignal } = usePendingSignals();
 
   useEffect(() => {
     fetchWatchlist();
     fetchSignals();
-    fetch("/api/engine-log")
-      .then((r) => r.json())
-      .then((d) => {
-        if (Array.isArray(d.filterLogs)) setFilterLogs(d.filterLogs);
-        // DART 위험공시 종목 코드 세트 추출
-        const dartSet = new Set<string>();
-        (d.filterLogs as FilterLog[] || []).forEach((l) => {
-          if (l.action_type === "dart_filtered") dartSet.add(l.stock_code);
-        });
-        setDartCodes(dartSet);
-      })
-      .catch(() => {});
-  }, [fetchWatchlist, fetchSignals]);
+    fetchEngineLog();
+  }, [fetchWatchlist, fetchSignals, fetchEngineLog]);
 
   // 종목 검색 디바운스
   useEffect(() => {
@@ -90,27 +39,13 @@ export function SignalTab() {
   }, [searchQuery]);
 
   const addToWatchlist = async (code: string, name: string) => {
-    setLoading(true);
-    try {
-      await fetch("/api/watchlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, name }),
-      });
-      setSearchQuery("");
-      setSearchResults([]);
-      fetchWatchlist();
-    } catch { /* ignore */ }
-    setLoading(false);
+    await addItem(code, name);
+    setSearchQuery("");
+    setSearchResults([]);
   };
 
   const removeFromWatchlist = async (code: string) => {
-    await fetch("/api/watchlist", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
-    });
-    fetchWatchlist();
+    await removeItem(code);
   };
 
   const handleSignalAction = async (id: string, action: "approved" | "rejected") => {
@@ -144,11 +79,7 @@ export function SignalTab() {
             const orderData = await orderRes.json();
             if (orderRes.ok && orderData.rt_cd === "0") {
               // 매수 성공 → expired 처리
-              await fetch("/api/pending-signals", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id, status: "expired" }),
-              });
+              await expireSignal(id);
             } else {
               // 매수 실패 → approved 유지, 엔진이 다음 사이클에서 재시도
               alert(`즉시매수 실패 (엔진이 재시도합니다): ${orderData.msg1 || orderData.error || "알 수 없는 오류"}`);

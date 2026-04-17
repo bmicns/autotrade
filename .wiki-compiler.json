@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "mode": "codebase",
+  "name": "NEXIO",
+  "sources": [
+    {
+      "path": "./",
+      "exclude": ["node_modules/", "dist/", ".git/", "wiki/", ".next/", "coverage/", "_archive/"]
+    }
+  ],
+  "output": "wiki/",
+  "service_discovery": "auto",
+  "knowledge_files": ["README.md", "CLAUDE.md", "AGENTS.md", "docs/**/*.md", ".env.example"],
+  "deep_scan": false,
+  "auto_update": "prompt",
+  "article_sections": [
+    "Purpose",
+    "Architecture",
+    "Trading Engine",
+    "Signal System",
+    "Adaptive Learning Engine",
+    "Order Management",
+    "Position Sizing",
+    "Data & Database",
+    "API Endpoints",
+    "Key Decisions",
+    "Gotchas",
+    "Sources"
+  ]
+}

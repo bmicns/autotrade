@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { COLORS } from "@/lib/constants";
 import { Icon } from "@/components/ui/icons";
 import { BacktestSection } from "@/components/stats/backtest-section";
 import { LearningSection } from "@/components/stats/learning-section";
-import { StockStatsSection, type StockStat } from "@/components/stats/stock-stats-section";
-import type { PerformanceStats } from "@/lib/analytics";
+import { StockStatsSection } from "@/components/stats/stock-stats-section";
+import { useStats, type Period } from "@/hooks/useStats";
 
-type Period = "1w" | "1m" | "3m" | "all";
 const PERIODS: { id: Period; label: string }[] = [
   { id: "1w", label: "1주" },
   { id: "1m", label: "1개월" },
@@ -24,58 +23,11 @@ const EXIT_LABELS: Record<string, string> = {
   unknown: "기타",
 };
 
-interface StatsData extends PerformanceStats {
-  positions?: Array<{
-    id: string; stock_code: string; stock_name: string | null;
-    entry_price: number; exit_price: number | null; entry_date: string;
-    exit_date: string | null; exit_reason: string | null;
-    pnl_amount: number | null; pnl_percent: number | null;
-    hold_days: number | null; status: string; signal_strength: string | null;
-  }>;
-}
-
-interface LearningData {
-  snapshot: import("@/components/stats/learning-section").LearningSnapshot | null;
-  isExpired: boolean;
-  history: import("@/components/stats/learning-section").LearningSnapshot[];
-}
-
-// LearningSnapshot 타입 재export (stats-tab 내부용)
-type LearningSnapshot = import("@/components/stats/learning-section").LearningSnapshot;
-
 export function StatsTab() {
   const [period, setPeriod] = useState<Period>("all");
-  const [stats, setStats] = useState<StatsData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [learningData, setLearningData] = useState<LearningData | null>(null);
-  const [stockStats, setStockStats] = useState<StockStat[]>([]);
+  const { stats, learningData, stockStats, loading, fetchStats } = useStats();
 
-  const fetchStats = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [statsRes, learnRes, stocksRes] = await Promise.all([
-        fetch(`/api/stats?period=${period}`),
-        fetch("/api/learn?history=5"),
-        fetch("/api/stats/stocks"),
-      ]);
-      if (statsRes.ok) setStats(await statsRes.json());
-      if (learnRes.ok) {
-        const learnJson = await learnRes.json();
-        setLearningData({
-          snapshot: learnJson.snapshot as LearningSnapshot | null,
-          isExpired: learnJson.isExpired ?? true,
-          history: (learnJson.history ?? []) as LearningSnapshot[],
-        });
-      }
-      if (stocksRes.ok) {
-        const stocksJson = await stocksRes.json();
-        setStockStats(stocksJson.stocks ?? []);
-      }
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
-  }, [period]);
-
-  useEffect(() => { fetchStats(); }, [fetchStats]);
+  useEffect(() => { fetchStats(period); }, [fetchStats, period]);
 
   if (loading) {
     return (
@@ -332,6 +284,7 @@ export function StatsTab() {
         snapshot={learningData?.snapshot ?? null}
         isExpired={learningData?.isExpired ?? true}
         history={learningData?.history ?? []}
+        abStats={learningData?.abStats}
       />
 
       {/* ── 종목별 성과 ── */}

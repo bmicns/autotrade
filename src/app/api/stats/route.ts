@@ -1,11 +1,7 @@
+import { supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { analyzePerformance, type Position } from "@/lib/analytics";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
 
 export async function GET(req: NextRequest) {
   const period = req.nextUrl.searchParams.get("period") || "all";
