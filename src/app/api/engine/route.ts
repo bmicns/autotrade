@@ -75,6 +75,26 @@ export async function POST(req: NextRequest) {
   return runEngine({ ...config, takeProfitRatio: config.takeProfitRatio ?? 50, dailyLossLimit: config.dailyLossLimit ?? -3, dynamicRisk: config.dynamicRisk ?? true, maxHoldDays: config.maxHoldDays ?? 5 });
 }
 
+// ─── 헬퍼: 배치 병렬 패치 ───────────────────────
+async function batchFetch<T>(
+  codes: string[],
+  fetcher: (code: string) => Promise<T>,
+  batchSize = 3
+): Promise<Map<string, T>> {
+  const map = new Map<string, T>();
+  for (let i = 0; i < codes.length; i += batchSize) {
+    const chunk = codes.slice(i, i + batchSize);
+    const results = await Promise.allSettled(
+      chunk.map(async (code) => ({ code, data: await fetcher(code) }))
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled") map.set(r.value.code, r.value.data);
+    }
+    if (i + batchSize < codes.length) await new Promise((r) => setTimeout(r, 200));
+  }
+  return map;
+}
+
 // ─── 엔진 본체 ──────────────────────────────────
 async function runEngine(config: EngineConfig) {
   const startTime = Date.now();
@@ -267,20 +287,26 @@ async function runEngine(config: EngineConfig) {
 
     // ═══ STEP 2: 관심종목 신호 분석 (매수) ═══
     const watchlist: string[] = config.watchlist ?? [];
+    const availableWatchlist = watchlist.filter(
+      (code) => !holdings.some((h: Record<string, string>) => h.pdno === code && Number(h.hldg_qty) > 0)
+    );
+
+    const wCandleMap = await batchFetch(availableWatchlist, (code) => getDailyCandles(config, code));
+    const wInvestorMap = await batchFetch(availableWatchlist, (code) => getInvestorTrend(config, code));
+    scannedCount += availableWatchlist.length;
 
     for (const code of watchlist) {
       if (tradeCount >= maxDailyTrades) break;
-      if (holdings.some((h: Record<string, string>) => h.pdno === code && Number(h.hldg_qty) > 0)) continue;
+      if (!wCandleMap.has(code)) continue;
 
-      const candles = await getDailyCandles(config, code);
-      scannedCount++;
+      const candles = wCandleMap.get(code)!;
       if (candles.length < 26) continue;
 
       const baseSignal = analyzeSignal(candles);
       const learnedSignal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : baseSignal;
 
       const openingBonus = getOpeningBonus(code);
-      const investor = await getInvestorTrend(config, code);
+      const investor = wInvestorMap.get(code) ?? { orgn: 0, frgn: 0, bonus: 0, label: "" };
       const totalBonus = openingBonus + investor.bonus + marketTrend.bonus;
       const adjustedScore = learnedSignal.totalScore + totalBonus;
       const adjustedStrength = adjustedScore >= 70 ? "strong" : adjustedScore >= 40 ? "weak" : "none";
@@ -290,7 +316,6 @@ async function runEngine(config: EngineConfig) {
         investor.label ? `[${investor.label}]` : "",
         marketTrend.label ? `[${marketTrend.label}]` : "",
       ].filter(Boolean).join(" ");
-      await new Promise((r) => setTimeout(r, 200));
 
       if (adjustedStrength === "strong" && learnedSignal.side === "buy") {
         const priceData = await getPrice(config, code);
@@ -377,16 +402,19 @@ async function runEngine(config: EngineConfig) {
       const watchlistSet = new Set(watchlist);
       const candidates = surgeStocks.filter((c) => !holdingCodes.has(c) && !watchlistSet.has(c));
 
+      const sCandleMap = await batchFetch(candidates, (code) => getDailyCandles(config, code));
+      const sInvestorMap = await batchFetch(candidates, (code) => getInvestorTrend(config, code));
+      scannedCount += candidates.length;
+
       for (const code of candidates) {
         if (tradeCount >= maxDailyTrades) break;
 
-        const candles = await getDailyCandles(config, code);
-        scannedCount++;
+        const candles = sCandleMap.get(code) ?? [];
         if (candles.length < 26) continue;
 
         const surgeBaseSignal = analyzeSignal(candles);
         const surgeLearnedSignal = customWeights ? analyzeSignalWithWeights(candles, customWeights) : surgeBaseSignal;
-        const surgeInvestor = await getInvestorTrend(config, code);
+        const surgeInvestor = sInvestorMap.get(code) ?? { orgn: 0, frgn: 0, bonus: 0, label: "" };
         const surgeAdjustedScore = surgeLearnedSignal.totalScore + surgeInvestor.bonus + marketTrend.bonus;
         const surgeAdjustedStrength = surgeAdjustedScore >= 70 ? "strong" : surgeAdjustedScore >= 40 ? "weak" : "none";
         const surgeWeightsSource: "learned" | "default" = customWeights ? "learned" : "default";
@@ -394,7 +422,6 @@ async function runEngine(config: EngineConfig) {
           surgeInvestor.label ? `[${surgeInvestor.label}]` : "",
           marketTrend.label ? `[${marketTrend.label}]` : "",
         ].filter(Boolean).join(" ");
-        await new Promise((r) => setTimeout(r, 200));
 
         if (surgeAdjustedStrength === "strong" && surgeLearnedSignal.side === "buy") {
           const priceData = await getPrice(config, code);

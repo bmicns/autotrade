@@ -8,7 +8,6 @@ import { usePendingSignals } from "@/hooks/usePendingSignals";
 
 export function SignalTab() {
   const kisConnected = useAppStore((s) => s.kisConnected);
-  const kisConfig = useAppStore((s) => s.kisConfig);
   const [tab, setTab] = useState<"signals" | "watchlist">("signals");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{ code: string; name: string; market: string }[]>([]);
@@ -58,17 +57,13 @@ export function SignalTab() {
       });
       if (res.ok && action === "approved") {
         const signal = signals.find((s) => s.id === id);
-        if (signal && kisConfig.token) {
+        if (signal) {
           // 승인된 신호 → 즉시 시장가 매수 시도
           try {
             const orderRes = await fetch("/api/kis/order", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                appKey: kisConfig.appKey,
-                appSecret: kisConfig.appSecret,
-                accountNo: kisConfig.accountNo,
-                token: kisConfig.token,
                 stockCode: signal.stock_code,
                 side: "buy",
                 quantity: 1,
