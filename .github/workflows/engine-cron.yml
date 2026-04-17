@@ -1,0 +1,27 @@
+name: NEXIO Engine Cron
+
+on:
+  schedule:
+    - cron: "30 0 * * 1-5"  # KST 09:30
+    - cron: "0 2 * * 1-5"   # KST 11:00
+    - cron: "0 4 * * 1-5"   # KST 13:00
+    - cron: "30 5 * * 1-5"  # KST 14:30
+  workflow_dispatch:         # 수동 실행 가능
+
+jobs:
+  trigger-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger NEXIO engine
+        run: |
+          HTTP_STATUS=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            -X GET https://nexio.vercel.app/api/engine \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 60)
+          echo "HTTP Status: $HTTP_STATUS"
+          cat /tmp/response.txt
+          if [ "$HTTP_STATUS" -ge 400 ]; then
+            echo "Engine call failed with status $HTTP_STATUS"
+            exit 1
+          fi
