@@ -9,7 +9,7 @@ const CRON_ROUTES = new Set([
 ]);
 
 // 인증 불필요 공개 경로
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/api/auth/login"];
 
 const SESSION_COOKIE = "nexio_session";
 

@@ -1,13 +1,42 @@
 "use client";
 
-import { useActionState } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { COLORS } from "@/lib/constants";
-import { loginAction } from "@/actions/auth";
-
-const initialState = null;
 
 export default function LoginPage() {
-  const [state, formAction, isPending] = useActionState(loginAction, initialState);
+  const [id, setId] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error ?? "로그인 실패");
+        setLoading(false);
+        return;
+      }
+
+      router.push("/");
+      router.refresh();
+    } catch {
+      setError("네트워크 오류가 발생했습니다.");
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center px-5" style={{ background: COLORS.hero }}>
@@ -21,11 +50,12 @@ export default function LoginPage() {
         </div>
 
         {/* 폼 */}
-        <form action={formAction} className="flex flex-col gap-3 items-center">
+        <form onSubmit={handleLogin} className="flex flex-col gap-3 items-center">
           <input
             type="text"
-            name="id"
             placeholder="아이디"
+            value={id}
+            onChange={(e) => setId(e.target.value)}
             autoComplete="username"
             required
             className="rounded-lg border-none text-sm font-medium outline-none"
@@ -33,31 +63,32 @@ export default function LoginPage() {
           />
           <input
             type="password"
-            name="password"
             placeholder="비밀번호"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             required
             className="rounded-lg border-none text-sm font-medium outline-none"
             style={{ background: "rgba(255,255,255,0.08)", color: "#fff", padding: "16px", width: "80%" }}
           />
 
-          {state && !state.success && (
+          {error && (
             <p
               role="alert"
               className="rounded-lg px-4 py-2.5 text-xs font-medium w-4/5"
               style={{ background: `${COLORS.rise}20`, color: COLORS.rise }}
             >
-              {state.error}
+              {error}
             </p>
           )}
 
           <button
             type="submit"
-            disabled={isPending}
+            disabled={loading}
             className="mt-2 rounded-lg border-none text-sm font-bold text-white disabled:opacity-50"
             style={{ background: COLORS.rise, boxShadow: `0 4px 20px ${COLORS.rise}40`, padding: "16px", width: "80%" }}
           >
-            {isPending ? "로그인 중..." : "로그인"}
+            {loading ? "로그인 중..." : "로그인"}
           </button>
         </form>
       </div>
