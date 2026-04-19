@@ -29,7 +29,7 @@ export default function LoginPage() {
             autoComplete="username"
             required
             className="rounded-lg border-none px-4 py-3.5 text-sm font-medium outline-none"
-            style={{ background: "rgba(255,255,255,0.08)", color: "#fff", padding: "5px" }}
+            style={{ background: "rgba(255,255,255,0.08)", color: "#fff", padding: "20px" }}
           />
           <input
             type="password"
@@ -38,7 +38,7 @@ export default function LoginPage() {
             autoComplete="current-password"
             required
             className="rounded-lg border-none text-sm font-medium outline-none"
-            style={{ background: "rgba(255,255,255,0.08)", color: "#fff", padding: "5px" }}
+            style={{ background: "rgba(255,255,255,0.08)", color: "#fff", padding: "20px" }}
           />
 
           {state && !state.success && (
