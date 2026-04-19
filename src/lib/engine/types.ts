@@ -15,6 +15,7 @@ export interface EngineConfig {
   maxHoldDays: number;       // 최대 보유 기간 (일)
   dynamicRisk: boolean;      // #2 ATR 동적 손절 사용 여부
   watchlist?: string[];
+  maxPositions?: number;  // 동시 보유 종목 상한 (기본 5)
 }
 
 export interface InvestorTrend {
@@ -49,4 +50,23 @@ export interface OpenOrder {
   ord_gno_brno: string;
   pdno: string;
   rmn_qty: string;
+}
+
+export interface EngineAction {
+  type: string;
+  code: string;
+  name?: string;
+  detail: string;
+}
+
+export interface StepContext {
+  config: EngineConfig;
+  applied: import("@/lib/learning").AppliedLearning;
+  maxPerTrade: number;
+  maxDailyTrades: number;
+  maxPositions: number;
+  maxPerSector: number;  // 섹터당 최대 보유 종목 수 (0이면 비활성)
+  takeProfitRatio: number;
+  dailyLossLimit: number;
+  customWeights: { trending: Record<string, number>; ranging: Record<string, number> } | undefined;
 }

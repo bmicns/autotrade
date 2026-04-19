@@ -6,6 +6,7 @@ import { Icon } from "@/components/ui/icons";
 import { BacktestSection } from "@/components/stats/backtest-section";
 import { LearningSection } from "@/components/stats/learning-section";
 import { StockStatsSection } from "@/components/stats/stock-stats-section";
+import { EngineLogSection } from "@/components/stats/engine-log-section";
 import { useStats, type Period } from "@/hooks/useStats";
 
 const PERIODS: { id: Period; label: string }[] = [
@@ -294,6 +295,10 @@ export function StatsTab() {
           <StockStatsSection stats={stockStats} />
         </>
       )}
+
+      {/* ── 엔진 실행 로그 ── */}
+      <div style={{ height: 1, background: COLORS.line }} />
+      <EngineLogSection />
     </div>
   );
 }

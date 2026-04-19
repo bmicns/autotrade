@@ -1,68 +1,28 @@
 import { supabase } from "@/lib/supabase/api-client";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    // 최근 엔진 실행 5건에서 market_context + filter 로그 추출
-    const { data, error } = await supabase
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(1, Number(searchParams.get("page") ?? "1"));
+    const limit = Math.min(50, Math.max(1, Number(searchParams.get("limit") ?? "20")));
+    const offset = (page - 1) * limit;
+
+    const { data, error, count } = await supabase
       .from("engine_runs")
-      .select("id, run_at, actions")
-      .order("run_at", { ascending: false })
-      .limit(5);
+      .select("id, created_at, trade_count, scanned_count, duration_ms, error, actions", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    // market_context: 가장 최근 엔진 실행의 시장 모멘텀
-    let marketContext: {
-      kospi_rate: number;
-      kosdaq_rate: number;
-      avg_rate: number;
-      bonus: number;
-      label: string;
-    } | null = null;
-
-    // filter logs: 최근 5회 실행의 필터 탈락 종목
-    const filterLogs: Array<{
-      stock_code: string;
-      stock_name?: string;
-      action_type: string;
-      reason: string;
-      run_at: string;
-    }> = [];
-
-    for (const run of data || []) {
-      const actions: Array<Record<string, unknown>> = Array.isArray(run.actions) ? run.actions : [];
-
-      // market_context: 첫 번째 실행에서만 추출
-      if (!marketContext) {
-        const mc = actions.find((a) => a.action_type === "market_context");
-        if (mc) {
-          marketContext = {
-            kospi_rate: Number(mc.kospi_rate ?? 0),
-            kosdaq_rate: Number(mc.kosdaq_rate ?? 0),
-            avg_rate: Number(mc.avg_rate ?? 0),
-            bonus: Number(mc.bonus ?? 0),
-            label: String(mc.label ?? ""),
-          };
-        }
-      }
-
-      // filtered_out + dart_filtered 수집
-      for (const a of actions) {
-        if (a.action_type === "filtered_out" || a.action_type === "dart_filtered") {
-          filterLogs.push({
-            stock_code: String(a.stock_code ?? ""),
-            stock_name: a.stock_name ? String(a.stock_name) : undefined,
-            action_type: String(a.action_type),
-            reason: String(a.reason ?? ""),
-            run_at: String(run.run_at ?? ""),
-          });
-        }
-      }
-    }
-
-    return NextResponse.json({ marketContext, filterLogs });
+    return NextResponse.json({
+      runs: data ?? [],
+      total: count ?? 0,
+      page,
+      limit,
+      hasMore: (count ?? 0) > offset + limit,
+    });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }

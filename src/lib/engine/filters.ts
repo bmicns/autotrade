@@ -58,6 +58,20 @@ export async function getListingDate(config: EngineConfig, code: string): Promis
   }
 }
 
+// ─── 섹터 분산 필터 ──────────────────────────────
+export function applySectorFilter(
+  sector: string | null,
+  sectorCounts: Map<string, number>,
+  maxPerSector: number
+): FilterResult {
+  if (!sector || maxPerSector <= 0) return { passed: true, reason: "" };
+  const count = sectorCounts.get(sector) ?? 0;
+  if (count >= maxPerSector) {
+    return { passed: false, reason: `섹터 제한 (${sector} ${count}/${maxPerSector})` };
+  }
+  return { passed: true, reason: "" };
+}
+
 // ─── 종목 필터 ───────────────────────────────────
 export function applyStockFilter(priceData: Record<string, string>, listingDate: string): FilterResult {
   const reasons: string[] = [];

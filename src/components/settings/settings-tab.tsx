@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { COLORS } from "@/lib/constants";
 import { useAppStore, TradeSettings } from "@/lib/store";
 import { Icon } from "@/components/ui/icons";
+import { EngineControlSection } from "@/components/settings/engine-control-section";
 
 type SettingKey =
   | "maxAmountPerTrade"
@@ -324,6 +325,9 @@ export function SettingsTab() {
       </div>
 
       <div style={{ height: 1, background: COLORS.line }} />
+
+      {/* 엔진 제어 (비상 정지) */}
+      <EngineControlSection />
 
       {/* 매매 설정 */}
       {GROUPS.map((sec, si) => (

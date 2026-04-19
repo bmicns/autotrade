@@ -11,7 +11,7 @@ export function extractCandlePattern(signal: SignalResult): string {
 }
 
 // ─── Supabase 포지션 관리 ────────────────────────
-export async function openPosition(code: string, name: string | null, price: number, qty: number, signal: SignalResult, phase: "initial" | "full") {
+export async function openPosition(code: string, name: string | null, price: number, qty: number, signal: SignalResult, phase: "initial" | "full", sector?: string) {
   try {
     await supabase.from("positions").insert({
       stock_code: code, stock_name: name,
@@ -19,8 +19,26 @@ export async function openPosition(code: string, name: string | null, price: num
       entry_signal: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount, totalScore: signal.totalScore },
       signal_strength: signal.strength,
       phase, status: "open",
+      sector: sector ?? null,
     });
   } catch { /* ignore */ }
+}
+
+// open 포지션의 섹터별 건수 반환 (sector IS NOT NULL인 건만)
+export async function getSectorCounts(): Promise<Map<string, number>> {
+  try {
+    const { data } = await supabase
+      .from("positions")
+      .select("sector")
+      .eq("status", "open")
+      .not("sector", "is", null);
+    const map = new Map<string, number>();
+    for (const row of data ?? []) {
+      const s = row.sector as string;
+      map.set(s, (map.get(s) ?? 0) + 1);
+    }
+    return map;
+  } catch { return new Map(); }
 }
 
 export async function closePosition(code: string, exitPrice: number, exitQty: number, exitReason: string) {

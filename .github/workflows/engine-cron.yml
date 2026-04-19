@@ -2,10 +2,12 @@ name: NEXIO Engine Cron
 
 on:
   schedule:
-    - cron: "30 0 * * 1-5"  # KST 09:30
-    - cron: "0 2 * * 1-5"   # KST 11:00
-    - cron: "0 4 * * 1-5"   # KST 13:00
-    - cron: "30 5 * * 1-5"  # KST 14:30
+    - cron: "30 0 * * 1-5"  # KST 09:30 — 엔진
+    - cron: "0 2 * * 1-5"   # KST 11:00 — 엔진
+    - cron: "0 4 * * 1-5"   # KST 13:00 — 엔진
+    - cron: "30 5 * * 1-5"  # KST 14:30 — 엔진
+    - cron: "25 6 * * 1-5"  # KST 15:25 — 장 마감 정산
+    - cron: "30 6 * * 1-5"  # KST 15:30 — 일일 리포트
   workflow_dispatch:         # 수동 실행 가능
 
 jobs:
@@ -13,15 +15,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Trigger NEXIO engine
+      - name: Trigger NEXIO engine or daily report
         run: |
+          HOUR=$(date -u +%H)
+          MIN=$(date -u +%M)
+          KST_HOUR=$(( (HOUR + 9) % 24 ))
+          KST_TIME=$((KST_HOUR * 100 + MIN))
+
+          if [ "$KST_HOUR" -eq 15 ] && [ "$MIN" -ge 30 ]; then
+            ENDPOINT="https://nexio.vercel.app/api/daily-report"
+            LABEL="daily-report"
+          elif [ "$KST_HOUR" -eq 15 ] && [ "$MIN" -ge 25 ]; then
+            ENDPOINT="https://nexio.vercel.app/api/market-close"
+            LABEL="market-close"
+          else
+            ENDPOINT="https://nexio.vercel.app/api/engine"
+            LABEL="engine"
+          fi
+
+          echo "KST ${KST_HOUR}:${MIN} → calling ${LABEL}"
           HTTP_STATUS=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
-            -X GET https://nexio.vercel.app/api/engine \
+            -X GET "$ENDPOINT" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             --max-time 60)
           echo "HTTP Status: $HTTP_STATUS"
           cat /tmp/response.txt
           if [ "$HTTP_STATUS" -ge 400 ]; then
-            echo "Engine call failed with status $HTTP_STATUS"
+            echo "${LABEL} call failed with status $HTTP_STATUS"
             exit 1
           fi
