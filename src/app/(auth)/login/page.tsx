@@ -11,7 +11,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center px-5" style={{ background: COLORS.hero }}>
-      <div className="w-full max-w-[360px]">
+      <div className="w-full max-w-[360px]" style={{ marginTop: "-100px" }}>
         {/* 로고 */}
         <div className="mb-10 text-center">
           <div className="text-[28px] font-black tracking-[0.15em] text-white">
