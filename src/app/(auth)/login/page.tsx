@@ -17,19 +17,19 @@ export default function LoginPage() {
           <div className="text-[28px] font-black tracking-[0.15em] text-white">
             NEXIO<span style={{ color: COLORS.rise }}>.</span>
           </div>
-          <p className="mt-2 text-sm text-white/40">국내주식 자동매매 시스템</p>
+          <p className="mt-2 text-sm text-white/40" style={{ marginBottom: "10px" }}>국내주식 자동매매 시스템</p>
         </div>
 
         {/* 폼 */}
-        <form action={formAction} className="flex flex-col gap-3">
+        <form action={formAction} className="flex flex-col gap-3 items-center">
           <input
             type="text"
             name="id"
             placeholder="아이디"
             autoComplete="username"
             required
-            className="rounded-lg border-none px-4 py-3.5 text-sm font-medium outline-none"
-            style={{ background: "rgba(255,255,255,0.08)", color: "#fff", padding: "20px" }}
+            className="rounded-lg border-none text-sm font-medium outline-none"
+            style={{ background: "rgba(255,255,255,0.08)", color: "#fff", padding: "16px", width: "80%" }}
           />
           <input
             type="password"
@@ -38,13 +38,13 @@ export default function LoginPage() {
             autoComplete="current-password"
             required
             className="rounded-lg border-none text-sm font-medium outline-none"
-            style={{ background: "rgba(255,255,255,0.08)", color: "#fff", padding: "20px" }}
+            style={{ background: "rgba(255,255,255,0.08)", color: "#fff", padding: "16px", width: "80%" }}
           />
 
           {state && !state.success && (
             <p
               role="alert"
-              className="rounded-lg px-4 py-2.5 text-xs font-medium"
+              className="rounded-lg px-4 py-2.5 text-xs font-medium w-4/5"
               style={{ background: `${COLORS.rise}20`, color: COLORS.rise }}
             >
               {state.error}
@@ -54,8 +54,8 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isPending}
-            className="mt-2 rounded-lg border-none py-3.5 text-sm font-bold text-white disabled:opacity-50"
-            style={{ background: COLORS.rise, boxShadow: `0 4px 20px ${COLORS.rise}40` }}
+            className="mt-2 rounded-lg border-none text-sm font-bold text-white disabled:opacity-50"
+            style={{ background: COLORS.rise, boxShadow: `0 4px 20px ${COLORS.rise}40`, padding: "16px", width: "80%" }}
           >
             {isPending ? "로그인 중..." : "로그인"}
           </button>
