@@ -40,15 +40,21 @@ export function StatsTab() {
 
   if (!stats || stats.totalTrades === 0) {
     return (
-      <div style={{ padding: "60px 20px", textAlign: "center" }}>
-        <Icon name="bar" size={48} color={COLORS.dim} strokeWidth={1} />
-        <div style={{ marginTop: 16 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: COLORS.ink }}>매매 통계 없음</span>
+      <div>
+        <div style={{ padding: "40px 20px 24px", textAlign: "center" }}>
+          <Icon name="bar" size={48} color={COLORS.dim} strokeWidth={1} />
+          <div style={{ marginTop: 16 }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: COLORS.ink }}>매매 통계 없음</span>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <span style={{ fontSize: 13, color: COLORS.dim, lineHeight: 1.6 }}>
+              엔진이 매매를 실행하면 성과 데이터가 자동으로 집계됩니다.
+            </span>
+          </div>
         </div>
-        <div style={{ marginTop: 8 }}>
-          <span style={{ fontSize: 13, color: COLORS.dim, lineHeight: 1.6 }}>
-            엔진이 매매를 실행하면 성과 데이터가 자동으로 집계됩니다.
-          </span>
+        <div style={{ height: 1, background: COLORS.line }} />
+        <div style={{ padding: "0 16px 40px" }}>
+          <EngineLogSection />
         </div>
       </div>
     );
@@ -75,13 +81,20 @@ export function StatsTab() {
         ))}
       </div>
 
+      {/* engine_runs 기반 데이터 안내 */}
+      {stats.dataSource === "engine_runs" && (
+        <div style={{ margin: "0 16px 8px", padding: "8px 12px", borderRadius: 8, background: "#FFF8E7", border: "1px solid #F6CC6B", fontSize: 11, color: "#92670A" }}>
+          ※ 포지션 DB 미적재 — 엔진 실행 로그 기반 집계 (수익률% 기준, 손익액 제외)
+        </div>
+      )}
+
       {/* ── 요약 카드 4개 ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "4px 16px 16px" }}>
         {[
-          { label: "승률", value: `${stats.winRate.toFixed(1)}%`, sub: `${stats.winCount}승 ${stats.lossCount}패`, color: stats.winRate >= 50 ? "#22C55E" : COLORS.rise },
-          { label: "평균 수익률", value: `${stats.avgReturn >= 0 ? "+" : ""}${stats.avgReturn.toFixed(2)}%`, sub: `${stats.closedTrades}건 청산`, color: stats.avgReturn >= 0 ? "#22C55E" : COLORS.rise },
-          { label: "총 손익", value: `${stats.totalPnl >= 0 ? "+" : ""}${Math.round(stats.totalPnl).toLocaleString("ko-KR")}원`, sub: `PF ${stats.profitFactor === Infinity ? "∞" : stats.profitFactor.toFixed(2)}`, color: stats.totalPnl >= 0 ? "#22C55E" : COLORS.rise },
-          { label: "최대 낙폭", value: `${stats.maxDrawdown.toFixed(1)}%`, sub: `평균 ${stats.avgHoldDays.toFixed(0)}일 보유`, color: stats.maxDrawdown > 10 ? COLORS.rise : COLORS.dim },
+          { label: "승률", value: `${stats.winRate.toFixed(1)}%`, sub: `${stats.winCount}승 ${stats.lossCount}패`, color: stats.winRate >= 50 ? COLORS.rise : COLORS.fall },
+          { label: "평균 수익률", value: `${stats.avgReturn >= 0 ? "+" : ""}${stats.avgReturn.toFixed(2)}%`, sub: `${stats.closedTrades}건 청산`, color: stats.avgReturn >= 0 ? COLORS.rise : COLORS.fall },
+          { label: "총 손익", value: stats.dataSource === "engine_runs" ? "—" : `${stats.totalPnl >= 0 ? "+" : ""}${Math.round(stats.totalPnl).toLocaleString("ko-KR")}원`, sub: stats.dataSource === "engine_runs" ? "원화 미산출" : `PF ${stats.profitFactor === Infinity ? "∞" : stats.profitFactor.toFixed(2)}`, color: stats.dataSource === "engine_runs" ? COLORS.dim : stats.totalPnl >= 0 ? COLORS.rise : COLORS.fall },
+          { label: "최대 낙폭", value: `${stats.maxDrawdown.toFixed(1)}%`, sub: `평균 ${stats.avgHoldDays.toFixed(0)}일 보유`, color: stats.maxDrawdown > 10 ? COLORS.fall : COLORS.dim },
         ].map((card, i) => (
           <div key={i} style={{
             background: COLORS.sub, borderRadius: 12, padding: "14px 16px",
@@ -101,8 +114,11 @@ export function StatsTab() {
       <div style={{ height: 1, background: COLORS.line }} />
 
       {/* ── 지표 적중률 ── */}
-      <div style={{ padding: "20px 20px 10px" }}>
+      <div style={{ padding: "20px 20px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>지표별 적중률</span>
+        {!stats.indicatorAccuracy.some((ind) => ind.totalUsed > 0) && (
+          <span style={{ fontSize: 10, color: COLORS.dim }}>매수 포지션 누적 후 표시</span>
+        )}
       </div>
       <div style={{ padding: "0 20px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
         {stats.indicatorAccuracy.map((ind) => (
@@ -111,7 +127,7 @@ export function StatsTab() {
             <div style={{ flex: 1, height: 8, borderRadius: 4, background: COLORS.sub, overflow: "hidden" }}>
               <div style={{
                 width: `${Math.min(ind.accuracy, 100)}%`, height: "100%", borderRadius: 4,
-                background: ind.accuracy >= 60 ? "#22C55E" : ind.accuracy >= 40 ? "#F59E0B" : COLORS.rise,
+                background: ind.accuracy >= 60 ? COLORS.rise : ind.accuracy >= 40 ? "#F59E0B" : COLORS.fall,
                 transition: "width 0.5s ease",
               }} />
             </div>
@@ -140,7 +156,7 @@ export function StatsTab() {
                 <span style={{ fontSize: 11, fontWeight: 600, color: COLORS.dim }}>{EXIT_LABELS[er.reason] || er.reason}</span>
                 <div style={{ marginTop: 4, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                   <span style={{ fontSize: 16, fontWeight: 800, color: COLORS.ink }}>{er.count}</span>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: er.avgPnl >= 0 ? "#22C55E" : COLORS.rise }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: er.avgPnl >= 0 ? COLORS.rise : COLORS.fall }}>
                     평균 {er.avgPnl >= 0 ? "+" : ""}{Math.round(er.avgPnl).toLocaleString("ko-KR")}원
                   </span>
                 </div>
@@ -167,11 +183,11 @@ export function StatsTab() {
               {stats.monthlyBreakdown.map((m) => (
                 <div key={m.month} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", padding: "10px 14px", borderTop: `1px solid ${COLORS.line}` }}>
                   <span style={{ fontSize: 12, fontWeight: 500, color: COLORS.ink }}>{m.month.slice(5)}월</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: m.pnl >= 0 ? "#22C55E" : COLORS.rise, fontVariantNumeric: "tabular-nums" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: m.pnl >= 0 ? COLORS.rise : COLORS.fall, fontVariantNumeric: "tabular-nums" }}>
                     {m.pnl >= 0 ? "+" : ""}{(m.pnl / 10000).toFixed(0)}만
                   </span>
                   <span style={{ fontSize: 12, color: COLORS.mid }}>{m.trades}건</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: m.winRate >= 50 ? "#22C55E" : COLORS.rise }}>{m.winRate.toFixed(0)}%</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: m.winRate >= 50 ? COLORS.rise : COLORS.fall }}>{m.winRate.toFixed(0)}%</span>
                 </div>
               ))}
             </div>
@@ -224,9 +240,9 @@ export function StatsTab() {
                   {p.exit_reason && (
                     <span style={{
                       fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
-                      background: p.exit_reason === "take_profit" || p.exit_reason === "trailing_stop" ? "#F0FDF4" : "#FEF2F2",
-                      color: p.exit_reason === "take_profit" || p.exit_reason === "trailing_stop" ? "#16A34A" : "#DC2626",
-                      border: `1px solid ${p.exit_reason === "take_profit" || p.exit_reason === "trailing_stop" ? "#BBF7D0" : "#FECACA"}`,
+                      background: p.exit_reason === "take_profit" ? COLORS.riseL : COLORS.fallL,
+                      color: p.exit_reason === "take_profit" ? COLORS.rise : COLORS.fall,
+                      border: `1px solid ${p.exit_reason === "take_profit" ? COLORS.riseB : COLORS.fallB}`,
                     }}>
                       {EXIT_LABELS[p.exit_reason] || p.exit_reason}
                     </span>
@@ -239,14 +255,16 @@ export function StatsTab() {
                 </div>
               </div>
               <div style={{ textAlign: "right" }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: isWin ? "#22C55E" : COLORS.rise, fontVariantNumeric: "tabular-nums" }}>
-                  {isWin ? "+" : ""}{Math.round(p.pnl_amount ?? 0).toLocaleString("ko-KR")}원
+                <span style={{ fontSize: 18, fontWeight: 800, color: isWin ? COLORS.rise : COLORS.fall, fontVariantNumeric: "tabular-nums" }}>
+                  {(p.pnl_percent ?? 0) >= 0 ? "+" : ""}{(p.pnl_percent ?? 0).toFixed(2)}%
                 </span>
-                <div style={{ marginTop: 2 }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: isWin ? "#22C55E" : COLORS.rise }}>
-                    {(p.pnl_percent ?? 0) >= 0 ? "+" : ""}{(p.pnl_percent ?? 0).toFixed(2)}%
-                  </span>
-                </div>
+                {p.pnl_amount !== null && Math.abs(p.pnl_amount) > 100 && (
+                  <div style={{ marginTop: 2 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: isWin ? COLORS.rise : COLORS.fall, fontVariantNumeric: "tabular-nums" }}>
+                      {isWin ? "+" : ""}{Math.round(p.pnl_amount).toLocaleString("ko-KR")}원
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
             <div style={{ height: 1, background: COLORS.line }} />
@@ -258,26 +276,26 @@ export function StatsTab() {
       {(stats.bestTrade || stats.worstTrade) && (
         <div style={{ display: "flex", gap: 8, padding: "16px" }}>
           {stats.bestTrade && (
-            <div style={{ flex: 1, padding: "12px 14px", borderRadius: 12, background: "#F0FDF4", border: "1px solid #BBF7D0" }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: "#16A34A" }}>BEST</span>
+            <div style={{ flex: 1, padding: "12px 14px", borderRadius: 12, background: COLORS.riseL, border: `1px solid ${COLORS.riseB}` }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: COLORS.rise }}>BEST</span>
               <div style={{ marginTop: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#16A34A" }}>{stats.bestTrade.name}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.rise }}>{stats.bestTrade.name}</span>
               </div>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#16A34A" }}>+{Math.round(stats.bestTrade.pnl).toLocaleString("ko-KR")}원</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.rise }}>+{Math.round(stats.bestTrade.pnl).toLocaleString("ko-KR")}원</span>
             </div>
           )}
           {stats.worstTrade && (
-            <div style={{ flex: 1, padding: "12px 14px", borderRadius: 12, background: "#FEF2F2", border: "1px solid #FECACA" }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626" }}>WORST</span>
+            <div style={{ flex: 1, padding: "12px 14px", borderRadius: 12, background: COLORS.fallL, border: `1px solid ${COLORS.fallB}` }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: COLORS.fall }}>WORST</span>
               <div style={{ marginTop: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#DC2626" }}>{stats.worstTrade.name}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.fall }}>{stats.worstTrade.name}</span>
               </div>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#DC2626" }}>{Math.round(stats.worstTrade.pnl).toLocaleString("ko-KR")}원</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.fall }}>{Math.round(stats.worstTrade.pnl).toLocaleString("ko-KR")}원</span>
             </div>
           )}
         </div>
       )}
-      <BacktestSection />
+      <div style={{ padding: "0 16px" }}><BacktestSection /></div>
 
       {/* ── 자가학습 현황 ── */}
       <div style={{ height: 1, background: COLORS.line }} />
@@ -298,7 +316,7 @@ export function StatsTab() {
 
       {/* ── 엔진 실행 로그 ── */}
       <div style={{ height: 1, background: COLORS.line }} />
-      <EngineLogSection />
+      <div style={{ padding: "0 16px 40px" }}><EngineLogSection /></div>
     </div>
   );
 }

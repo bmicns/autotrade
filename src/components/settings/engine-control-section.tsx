@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { COLORS } from "@/lib/constants";
-import { setEngineEnabled, setMaxPositions as saveMaxPositionsAction } from "@/actions/engine-control";
+import { setEngineEnabled, setMaxPositions as saveMaxPositionsAction, setMaxPerSector as saveMaxPerSectorAction } from "@/actions/engine-control";
 
 export function EngineControlSection() {
   const [enabled, setEnabled] = useState(true);
@@ -12,6 +12,9 @@ export function EngineControlSection() {
   const [maxPositions, setMaxPositions] = useState(5);
   const [posInput, setPosInput] = useState("5");
   const [posSaved, setPosSaved] = useState(false);
+  const [maxPerSector, setMaxPerSector] = useState(2);
+  const [secInput, setSecInput] = useState("2");
+  const [secSaved, setSecSaved] = useState(false);
 
   useEffect(() => {
     fetch("/api/engine-control")
@@ -20,9 +23,25 @@ export function EngineControlSection() {
         setEnabled(d.engine_enabled ?? true);
         setMaxPositions(d.max_positions ?? 5);
         setPosInput(String(d.max_positions ?? 5));
+        setMaxPerSector(d.max_per_sector ?? 2);
+        setSecInput(String(d.max_per_sector ?? 2));
       })
       .finally(() => setLoading(false));
   }, []);
+
+  const saveMaxPerSector = async () => {
+    const val = Number(secInput);
+    if (!Number.isInteger(val) || val < 1 || val > 10) return;
+    setSaving(true);
+    try {
+      await saveMaxPerSectorAction(val);
+      setMaxPerSector(val);
+      setSecSaved(true);
+      setTimeout(() => setSecSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const saveMaxPositions = async () => {
     const val = Number(posInput);
@@ -122,6 +141,42 @@ export function EngineControlSection() {
         </div>
         <div style={{ fontSize: 11, color: COLORS.dim, marginTop: 6 }}>
           현재 설정: {maxPositions}종목 · 보유 종목이 이 수에 도달하면 신규 매수 건너뜀
+        </div>
+      </div>
+
+      {/* 섹터당 최대 종목 수 */}
+      <div style={{ padding: "0 20px 20px" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 8 }}>섹터당 최대 보유 종목 수</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            type="number"
+            value={secInput}
+            onChange={(e) => setSecInput(e.target.value)}
+            min={1} max={10} step={1}
+            style={{
+              flex: 1, padding: "10px 12px", borderRadius: 10,
+              border: `1.5px solid ${COLORS.line}`, background: COLORS.sub,
+              color: COLORS.ink, fontSize: 16, fontWeight: 700,
+              fontFamily: "inherit", outline: "none", textAlign: "center",
+            }}
+          />
+          <span style={{ fontSize: 13, color: COLORS.mid }}>종목</span>
+          <button
+            disabled={saving || Number(secInput) === maxPerSector}
+            onClick={saveMaxPerSector}
+            style={{
+              padding: "10px 16px", borderRadius: 10, border: "none",
+              background: secSaved ? "#22C55E" : COLORS.ink, color: "#fff",
+              fontSize: 13, fontWeight: 700, cursor: "pointer",
+              fontFamily: "inherit",
+              opacity: (saving || Number(secInput) === maxPerSector) ? 0.5 : 1,
+            }}
+          >
+            {secSaved ? "✓" : "저장"}
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: COLORS.dim, marginTop: 6 }}>
+          현재 설정: {maxPerSector}종목 · 같은 섹터 종목이 이 수에 도달하면 신규 매수 건너뜀
         </div>
       </div>
 

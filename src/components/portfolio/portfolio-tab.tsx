@@ -5,6 +5,7 @@ import { COLORS } from "@/lib/constants";
 import { useAppStore } from "@/lib/store";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Donut } from "@/components/ui/donut";
+import { PortfolioSnapshot } from "@/components/portfolio/portfolio-snapshot";
 
 interface PositionInfo {
   stock_code: string;
@@ -14,6 +15,7 @@ interface PositionInfo {
 export function PortfolioTab() {
   const holdings = useAppStore((s) => s.holdings);
   const prices = useAppStore((s) => s.prices);
+  const candles = useAppStore((s) => s.candles);
   const kisConnected = useAppStore((s) => s.kisConnected);
   const cashBalance = useAppStore((s) => s.cashBalance);
   const storeTotalEval = useAppStore((s) => s.totalEval);
@@ -43,8 +45,10 @@ export function PortfolioTab() {
 
   const enriched = holdings.map((h) => {
     const real = prices.get(h.code);
-    const cur = real?.price ?? 0;
-    const pct = h.avgPrice > 0 && cur > 0 ? ((cur - h.avgPrice) / h.avgPrice) * 100 : 0;
+    const cur = real?.price ?? h.currentPrice ?? 0;
+    const pct = cur > 0 && h.avgPrice > 0
+      ? ((cur - h.avgPrice) / h.avgPrice) * 100
+      : (h.pnlRate ?? 0);
     return { ...h, cur, pct, up: pct >= 0 };
   });
 
@@ -111,6 +115,7 @@ export function PortfolioTab() {
       <div style={{ padding: "20px 20px 10px" }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>보유 종목 ({enriched.length})</span>
       </div>
+      <PortfolioSnapshot />
       {enriched.map((h) => {
         const holdInfo = calcHoldInfo(h.code);
         const isDanger = holdInfo !== null && holdInfo.dday <= 1;
@@ -148,7 +153,13 @@ export function PortfolioTab() {
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-                {h.cur > 0 && <Sparkline data={[h.cur * 0.98, h.cur * 0.99, h.cur]} color={h.up ? COLORS.rise : COLORS.fall} />}
+                {h.cur > 0 && (
+                  <Sparkline
+                    data={(() => { const c = candles.get(h.code); return c && c.length >= 2 ? c : [h.cur * 0.98, h.cur * 0.99, h.cur]; })()}
+                    color={h.up ? COLORS.rise : COLORS.fall}
+                    baseline={h.avgPrice}
+                  />
+                )}
                 <div style={{ textAlign: "right", minWidth: 72 }}>
                   <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink, fontVariantNumeric: "tabular-nums" }}>
                     {h.cur > 0 ? h.cur.toLocaleString() : "—"}

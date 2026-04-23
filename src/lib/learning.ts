@@ -182,10 +182,29 @@ export function applyLearning(
   if (!learned || learned.confidence === "none") return defaults;
 
   if (learned.confidence === "low") {
+    // 콜드 스타트 완화: 학습 가중치 50% + 기본 가중치 50% 블렌딩
+    const partialWeight = 0.5;
+    const blendedWeights: { trending: Record<string, number>; ranging: Record<string, number> } = {
+      trending: Object.fromEntries(
+        Object.keys(BASE_WEIGHTS.trending).map((k) => [
+          k,
+          (learned.weights.trending[k] ?? BASE_WEIGHTS.trending[k as keyof typeof BASE_WEIGHTS.trending]) * partialWeight +
+          BASE_WEIGHTS.trending[k as keyof typeof BASE_WEIGHTS.trending] * (1 - partialWeight),
+        ])
+      ),
+      ranging: Object.fromEntries(
+        Object.keys(BASE_WEIGHTS.ranging).map((k) => [
+          k,
+          (learned.weights.ranging[k] ?? BASE_WEIGHTS.ranging[k as keyof typeof BASE_WEIGHTS.ranging]) * partialWeight +
+          BASE_WEIGHTS.ranging[k as keyof typeof BASE_WEIGHTS.ranging] * (1 - partialWeight),
+        ])
+      ),
+    };
     return {
-      ...defaults,
+      weights: blendedWeights,
       atrMultipliers: learned.atrMultipliers,
       targetRiskAmount: learned.positionSizing.targetRiskAmount,
+      takeProfitRatio: defaults.takeProfitRatio,
     };
   }
 

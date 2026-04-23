@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifySessionToken } from "@/lib/session";
 
 // 크론 전용 라우트 — CRON_SECRET Bearer로 인증, 세션 검증 생략
+// /api/learn POST는 GET(공개 조회)과 공유하므로 자체 핸들러에서 CRON_SECRET 검증
 const CRON_ROUTES = new Set([
   "/api/engine",
   "/api/daily-report",
@@ -31,11 +33,11 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // 세션 쿠키 검증
+  // 세션 쿠키 검증 (HMAC-SHA256 서명 + 타임스탬프 만료 검증)
   const sessionToken = req.cookies.get(SESSION_COOKIE)?.value;
   const secret = process.env.SESSION_SECRET;
 
-  if (!secret || sessionToken !== secret) {
+  if (!secret || !sessionToken || !verifySessionToken(sessionToken, secret)) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -49,6 +51,6 @@ export async function proxy(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|js|css|woff|woff2|ttf|eot|map)$).*)",
   ],
 };

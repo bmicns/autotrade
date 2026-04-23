@@ -1,8 +1,8 @@
 # NEXIO Wiki — 인덱스
 
 > **프로젝트**: NEXIO (AI 자동매매 시스템)  
-> **버전**: v5.14.0  
-> **컴파일 날짜**: 2026-04-17  
+> **버전**: v5.2.1 (Phase 2 고도화 완료)  
+> **컴파일 날짜**: 2026-04-20  
 > **배포**: https://nexio.vercel.app
 
 ---
@@ -13,7 +13,7 @@
 |------|------|------|----------|
 | 플랫폼 개요 | [platform-overview.md](topics/platform-overview.md) | NEXIO 전체 기술 스택, 기능 영역, 식별 정보 | high |
 | 자동매매 엔진 | [trading-engine.md](topics/trading-engine.md) | GitHub Actions 4회/일 크론, lib/engine/* 모듈, STEP 0~3 상세 흐름 | high |
-| 신호 시스템 | [signal-system.md](topics/signal-system.md) | 7종 지표, 레짐, 보정 3종, pending_signals 승인 흐름, DART/종목 필터 | high |
+| 신호 시스템 | [signal-system.md](topics/signal-system.md) | 10종 지표(+StochRSI/OBV/이격도), 레짐, 보정 3종, pending_signals 승인 흐름, DART/종목 필터 | high |
 | 적응형 학습 엔진 | [adaptive-engine.md](topics/adaptive-engine.md) | learning.ts/learning-engine.ts 분리 구조, 신뢰도 체계, 학습 함수 | high |
 | 주문 관리 | [order-management.md](topics/order-management.md) | limitBuyOrder 지정가, 호가단위, DB credential 보안, batchFetch N+1 | high |
 | 데이터베이스 | [database.md](topics/database.md) | 8개 테이블 전체 스키마, 싱글턴 클라이언트, DB helper 함수 | high |
@@ -39,7 +39,8 @@ src/
 ├── lib/
 │   ├── engine/
 │   │   ├── types.ts             — EngineConfig, EngineAction, StepContext, MarketTrend 등
-│   │   ├── steps.ts             — STEP 0~3 실행 로직, batchFetch (466줄)
+│   │   ├── steps.ts             — STEP 0/1/1.5 (356줄), batchFetch
+│   │   ├── steps-scan.ts        — STEP 2/3 관심종목+급등주 스캔 (295줄)
 │   │   ├── notify.ts            — 텔레그램 알림 (sendTradeAlert, sendDailyReport)
 │   │   ├── db.ts                — DB helper (openPosition, closePosition 등)
 │   │   ├── kis.ts               — KIS API 호출 (limitBuyOrder, cancelOpenBuyOrders 등)
@@ -48,7 +49,8 @@ src/
 │   ├── learning.ts              — 학습 공개 API (runLearning, loadLatestLearning, applyLearning)
 │   ├── learning-engine.ts       — 학습 내부 구현 (learnWeights, learnAtrMultipliers 등)
 │   ├── supabase/api-client.ts   — 싱글턴 Supabase 클라이언트
-│   ├── kis/indicators.ts        — 기술 지표 + ATR + 포지션 사이징
+│   ├── kis/indicators.ts        — 기술 지표(10종) + ATR + 포지션 사이징
+│   ├── kis/indicators-calc.ts   — 순수 계산 함수 분리 (StochRSI, OBV, Disparity 포함)
 │   └── store.ts                 — Zustand 상태 관리
 ├── hooks/
 │   ├── usePendingSignals.ts     — 신호 승인 훅
@@ -74,6 +76,8 @@ src/
 | engine_runs | 엔진 실행 로그 |
 | market_snapshots | 장 초반 09:00 스냅샷 |
 | app_config | 엔진 제어 동적 설정 (engine_enabled, max_positions) |
+| pending_orders | 미체결 지정가 주문 추적 (체결 확인 루프용) |
+| portfolio_snapshots | 일별 포트폴리오 평가금액 (MDD/수익률 계산용) |
 
 ### 주요 API 엔드포인트
 
@@ -108,11 +112,13 @@ src/
 
 | 버전 | 날짜 | 주요 변경 |
 |------|------|----------|
+| v5.2.1 | 2026-04-20 | Phase 2: 10종 지표(StochRSI/OBV/이격도), 2단계 익절, 시장급락 차단, 체결확인 루프, 콜드스타트 수정, portfolio_snapshots/pending_orders 테이블 |
 | v5.14.0 | 2026-04-17 | steps.ts 분리, notify.ts(텔레그램), engine-control API, daily-report API, app_config 테이블 |
 | v5.9.x | 2026-04-17 | lib/engine/* 모듈 분리, batchFetch N+1 해소, KIS 자격증명 보안, GitHub Actions 크론 |
 | v5.9.0 | 2026-04-11 | 적응형 학습 엔진 전체 (P1~P6) |
 | v5.2.1 | (이전) | watchlist/신호승인/주문에러처리 |
 
 ## Recent Changes
-- 2026-04-17: 3개 토픽 업데이트 — steps.ts/notify.ts 신규, engine-control/daily-report API, app_config 테이블, v5.14.0 갱신
+- 2026-04-20: 5개 토픽 업데이트 — 10종 지표(+StochRSI/OBV/이격도), 2단계 익절, 시장급락 차단, 체결확인 루프, 콜드스타트 블렌딩, pending_orders/portfolio_snapshots 테이블 신규
+- 2026-04-17: 3개 토픽 업데이트 — steps.ts/notify.ts 신규, engine-control/daily-report API, app_config 테이블
 - 2026-04-17: 6개 토픽 전면 재컴파일 — lib/engine 모듈화, GitHub Actions 크론, 보안/성능 개선 반영

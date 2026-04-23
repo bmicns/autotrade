@@ -157,14 +157,22 @@ interface LearningResult {
 
 `applyLearning(learned, config)`이 신뢰도별로 주문에 사용할 파라미터를 결정한다:
 
+| 신뢰도 | 거래 수 | weights | ATR 배수 | targetRiskAmount | takeProfitRatio |
+|--------|---------|---------|----------|-----------------|----------------|
+| `none` | < 10 | BASE_WEIGHTS (기본값) | DEFAULT | 30,000원 (기본값) | config 기본값 |
+| `low` | 10–49 | **50% 블렌딩** (`learnedWeight * 0.5 + defaultWeight * 0.5`) | learned | learned | config 기본값 (미적용) |
+| `medium` | 30–49 *(구 기준)* → `low`로 통합 | learned (100%) | learned | learned | learned |
+| `high` | ≥ 50 | learned (100%) | learned | learned | learned |
+
+> **Cold Start Fix (2026-04-20)**: `low` 신뢰도 구간이 10–29 → **10–49**로 확대되고, 가중치에 50% 블렌딩이 도입되었다. 기존에는 임계값 미달 구간(10–49건)의 학습 결과가 가중치에 전혀 반영되지 않다가 50건 도달 순간 0% → 100%로 급변하는 **콜드 스타트 문제**가 있었다. 블렌딩으로 이 전환을 부드럽게 완화한다.
+
 ```typescript
-none:          weights=undefined, DEFAULT_ATR_MULTIPLIERS, targetRiskAmount=30000
-low:           weights=undefined, learned.atrMultipliers, learned.positionSizing.targetRiskAmount
-medium/high:   learned.weights, learned.atrMultipliers, learned.positionSizing.targetRiskAmount,
-               learned.risk.takeProfitRatio
+// low 신뢰도 가중치 블렌딩 (2026-04-20~)
+finalWeight = learnedWeight * 0.5 + defaultWeight * 0.5  // trending/ranging 각각 적용
+// takeProfitRatio는 low에서 미적용 — config 기본값 유지
 ```
 
-`weights = undefined`일 때 시그널 시스템은 BASE_WEIGHTS를 그대로 사용한다.
+`weights = undefined`(none)일 때 시그널 시스템은 BASE_WEIGHTS를 그대로 사용한다.
 
 ## Position Sizing
 
@@ -242,7 +250,9 @@ medium/high:   learned.weights, learned.atrMultipliers, learned.positionSizing.t
 
 **중앙값 기반 ATR 배수**: 평균 대신 중앙값(median)을 사용해 극단적 손절/익절 이상치의 영향 최소화.
 
-**신뢰도 등급별 차등 적용**: 데이터 부족 시 가중치 변경은 오히려 성능 악화 위험이 있어 low 신뢰도에서는 ATR·사이징만 반영하고 가중치는 BASE 유지.
+**신뢰도 등급별 차등 적용**: 데이터 부족 시 가중치 변경은 오히려 성능 악화 위험이 있어 low 신뢰도에서는 ATR·사이징만 반영하고 가중치는 BASE 유지. → v5.x Cold Start Fix에서 발전: low 구간(10–49건)에 50% 블렌딩 도입으로 급격한 전환 완화 (아래 참조).
+
+**Cold Start Fix (2026-04-20)**: `applyLearning()`의 `low` 신뢰도 범위를 10–29 → **10–49**로 확대하고, 이 구간에서 가중치를 `learnedWeight * 0.5 + defaultWeight * 0.5`로 블렌딩 처리. `takeProfitRatio`는 low에서 여전히 미적용(config 기본값). 핵심 문제: 기존 구현은 49번째 거래까지 학습 가중치가 0% 반영되다가 50번째 도달 시 100%로 급변 — 이 절벽을 없애는 것이 이번 수정의 목적.
 
 ## Gotchas
 

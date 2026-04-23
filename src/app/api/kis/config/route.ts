@@ -10,7 +10,7 @@ export async function GET() {
     .from("kis_config")
     .select("app_key, app_secret, account_no, token, token_expiry")
     .eq("id", ID)
-    .single();
+    .maybeSingle();
 
   if (!data) return NextResponse.json({ appKey: "", appSecret: "", accountNo: "" });
 

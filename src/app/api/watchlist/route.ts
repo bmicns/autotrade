@@ -13,10 +13,14 @@ export async function GET() {
   return NextResponse.json(data || []);
 }
 
+function validateCode(code: unknown): code is string {
+  return typeof code === "string" && /^\d{6}$/.test(code);
+}
+
 // POST: 관심종목 추가
 export async function POST(req: NextRequest) {
   const { code, name } = await req.json();
-  if (!code) return NextResponse.json({ error: "종목코드 필수" }, { status: 400 });
+  if (!validateCode(code)) return NextResponse.json({ error: "유효하지 않은 종목코드입니다" }, { status: 400 });
 
   const { data, error } = await supabase
     .from("watchlist")
@@ -31,7 +35,7 @@ export async function POST(req: NextRequest) {
 // DELETE: 관심종목 삭제
 export async function DELETE(req: NextRequest) {
   const { code } = await req.json();
-  if (!code) return NextResponse.json({ error: "종목코드 필수" }, { status: 400 });
+  if (!validateCode(code)) return NextResponse.json({ error: "유효하지 않은 종목코드입니다" }, { status: 400 });
 
   const { error } = await supabase.from("watchlist").delete().eq("code", code);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

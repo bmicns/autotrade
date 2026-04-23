@@ -2,13 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase/api-client";
 import { sendDailyReport } from "@/lib/engine/notify";
 
-export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  if (!process.env.CRON_SECRET) return NextResponse.json({ error: "CRON_SECRET 미설정" }, { status: 500 });
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+// GET /api/daily-report — 크론 전용 (proxy.ts CRON_ROUTES)
+// 수동 트리거가 필요한 경우 대시보드 UI에서 세션 인증 후 직접 호출하는 별도 엔드포인트 추가 고려
+export async function GET(_req: NextRequest) {
   const kstNow = new Date(Date.now() + 9 * 3600000);
   const today = kstNow.toISOString().slice(0, 10);
 

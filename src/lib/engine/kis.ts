@@ -1,10 +1,14 @@
 // ─── KIS API 호출 함수 ───────────────────────────
 import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
+import type { MinuteCandle } from "@/lib/engine/intraday";
 import { type DailyCandle } from "@/lib/kis/indicators";
 import { type EngineConfig, type OrderResult, type OpenOrder } from "./types";
+import { KIS_RATE_LIMIT_DELAY_MS, LIMIT_BUY_DISCOUNT } from "./constants";
+
+type KISCreds = Pick<EngineConfig, "appKey" | "appSecret" | "accountNo" | "token">;
 
 // ─── KIS API 유틸 ───────────────────────────────
-export function headers(config: EngineConfig, trId: string) {
+export function headers(config: KISCreds, trId: string) {
   return {
     "Content-Type": "application/json; charset=utf-8",
     authorization: `Bearer ${config.token}`,
@@ -102,7 +106,7 @@ export function roundToTick(price: number): number {
 
 // ─── 지정가 매수 (현재가 -0.5%) ─────────────────
 export async function limitBuyOrder(config: EngineConfig, code: string, qty: number, currentPrice: number): Promise<OrderResult & { limitPrice: number }> {
-  const limitPrice = roundToTick(currentPrice * 0.995);
+  const limitPrice = roundToTick(currentPrice * LIMIT_BUY_DISCOUNT);
   const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
   try {
     const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
@@ -127,8 +131,70 @@ export async function limitBuyOrder(config: EngineConfig, code: string, qty: num
   }
 }
 
+// ─── 주문 체결 여부 확인 ─────────────────────────
+export async function checkOrderFill(
+  config: EngineConfig,
+  orderNo: string,
+  stockCode: string,
+): Promise<{ filled: boolean; filledQty: number; filledPrice: number }> {
+  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
+  try {
+    const params = new URLSearchParams({
+      CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
+      INQR_STRT_DT: new Date().toISOString().slice(0, 10).replace(/-/g, ""),
+      INQR_END_DT: new Date().toISOString().slice(0, 10).replace(/-/g, ""),
+      SLL_BUY_DVSN_CD: "02",   // 매수
+      INQR_DVSN: "00",
+      PDNO: stockCode,
+      CCLD_DVSN: "01",          // 체결
+      ORD_GNO_BRNO: "", ODNO: orderNo,
+      INQR_DVSN_3: "", INQR_DVSN_1: "",
+      CTX_AREA_FK100: "", CTX_AREA_NK100: "",
+    });
+    const res = await fetch(
+      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/inquire-ccnl?${params}`,
+      { headers: headers(config, "VTTC8001R") },
+    );
+    if (!res.ok) return { filled: false, filledQty: 0, filledPrice: 0 };
+    const data = await res.json();
+    const output = (data.output || []) as Record<string, string>[];
+    const matched = output.filter((o) => o.odno === orderNo || o.orgn_odno === orderNo);
+    const totalFilled = matched.reduce((s, o) => s + (Number(o.tot_ccld_qty) || Number(o.ccld_qty) || 0), 0);
+    const filledPrice = matched.length > 0 ? (Number(matched[0].avg_prvs) || Number(matched[0].ccld_unpr) || 0) : 0;
+    return { filled: totalFilled > 0, filledQty: totalFilled, filledPrice };
+  } catch {
+    return { filled: false, filledQty: 0, filledPrice: 0 };
+  }
+}
+
+// ─── 분봉 조회 (VWAP / Volume Profile 계산용) ────
+export async function getMinuteCandles(config: EngineConfig, code: string): Promise<MinuteCandle[]> {
+  const params = new URLSearchParams({
+    fid_cond_mrkt_div_code: "J",
+    fid_input_iscd: code,
+    fid_input_hour_1: "090000",
+    fid_etc_cls_code: "",
+    fid_pw_data_incu_yn: "Y",
+  });
+  const res = await fetch(
+    `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice?${params}`,
+    { headers: headers(config, KIS_TR.MINUTE_CHART) },
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return ((data.output2 || []) as Record<string, string>[])
+    .map((d) => ({
+      time:   d.stck_cntg_hour ?? "",
+      close:  Number(d.stck_prpr)  || 0,
+      high:   Number(d.stck_hgpr)  || 0,
+      low:    Number(d.stck_lwpr)  || 0,
+      volume: Number(d.cntg_vol)   || 0,
+    }))
+    .filter((c) => c.close > 0 && c.volume > 0);
+}
+
 // ─── 미체결 매수 주문 조회 ───────────────────────
-export async function getOpenBuyOrders(config: EngineConfig): Promise<OpenOrder[]> {
+export async function getOpenBuyOrders(config: KISCreds): Promise<OpenOrder[]> {
   const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
   try {
     const params = new URLSearchParams({
@@ -150,7 +216,7 @@ export async function getOpenBuyOrders(config: EngineConfig): Promise<OpenOrder[
 }
 
 // ─── 미체결 주문 취소 ────────────────────────────
-export async function cancelOpenBuyOrders(config: EngineConfig): Promise<{ cancelled: number; failed: number }> {
+export async function cancelOpenBuyOrders(config: KISCreds): Promise<{ cancelled: number; failed: number }> {
   const orders = await getOpenBuyOrders(config);
   let cancelled = 0, failed = 0;
   const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
@@ -175,7 +241,7 @@ export async function cancelOpenBuyOrders(config: EngineConfig): Promise<{ cance
     } catch {
       failed++;
     }
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, KIS_RATE_LIMIT_DELAY_MS));
   }
   return { cancelled, failed };
 }

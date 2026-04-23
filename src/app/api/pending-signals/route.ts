@@ -1,6 +1,9 @@
 import { supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUUID(v: unknown): v is string { return typeof v === "string" && UUID_RE.test(v); }
+
 
 // GET: 대기 중인 신호 목록
 export async function GET() {
@@ -17,8 +20,8 @@ export async function GET() {
 // POST: 신호 승인/거부
 export async function POST(req: NextRequest) {
   const { id, action } = await req.json();
-  if (!id || !["approved", "rejected"].includes(action)) {
-    return NextResponse.json({ error: "id와 action(approved/rejected) 필수" }, { status: 400 });
+  if (!isUUID(id) || !["approved", "rejected"].includes(action)) {
+    return NextResponse.json({ error: "id(UUID)와 action(approved/rejected) 필수" }, { status: 400 });
   }
 
   // approved: resolved_at 없이 상태만 변경 (매수 성공 시 expired로 전환)
@@ -41,8 +44,8 @@ export async function POST(req: NextRequest) {
 // PATCH: 즉시매수 성공 후 expired 전환
 export async function PATCH(req: NextRequest) {
   const { id, status } = await req.json();
-  if (!id || status !== "expired") {
-    return NextResponse.json({ error: "id와 status=expired 필수" }, { status: 400 });
+  if (!isUUID(id) || status !== "expired") {
+    return NextResponse.json({ error: "id(UUID)와 status=expired 필수" }, { status: 400 });
   }
 
   const { data, error } = await supabase

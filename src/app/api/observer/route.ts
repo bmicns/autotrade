@@ -4,42 +4,59 @@ import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
 import { runLearning } from "@/lib/learning";
 
 
-export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  if (!process.env.CRON_SECRET) return NextResponse.json({ error: "CRON_SECRET 미설정" }, { status: 500 });
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export async function GET(_req: NextRequest) {
   const appKey = process.env.KIS_APP_KEY;
   const appSecret = process.env.KIS_APP_SECRET;
   if (!appKey || !appSecret) {
     return NextResponse.json({ error: "KIS 환경변수 미설정" }, { status: 400 });
   }
 
-  // 토큰 발급
+  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+  const nowUtc = new Date();
+  const isLearningDay = nowUtc.getUTCDay() === 1; // UTC 월요일
+
+  // ── 학습 실행: KIS 토큰과 무관하게 월요일에 항상 시도 ──
+  let learningResult: { confidence?: string; sampleSize?: number } | null = null;
+  if (isLearningDay) {
+    try {
+      const result = await runLearning();
+      learningResult = { confidence: result.confidence, sampleSize: result.sampleSize };
+    } catch { /* 학습 실패해도 observer 결과에 영향 없음 */ }
+  }
+
+  // ── 당일 이미 수집했으면 스킵 ──
+  const { data: existing } = await supabase.from("market_snapshots").select("id").eq("date", today).limit(1);
+  if (existing && existing.length > 0) {
+    return NextResponse.json({
+      skipped: true, reason: "당일 스냅샷 이미 존재",
+      ...(learningResult ? { learning: learningResult } : {}),
+    });
+  }
+
+  // ── watchlist 조회 후 비어있으면 토큰 발급 없이 스킵 ──
+  const { data: watchlistData } = await supabase.from("watchlist").select("code, name").eq("active", true);
+  const watchlist = watchlistData || [];
+  if (watchlist.length === 0) {
+    return NextResponse.json({
+      skipped: true, reason: "watchlist 비어있음",
+      ...(learningResult ? { learning: learningResult } : {}),
+    });
+  }
+
+  // ── 시장 스냅샷 수집: KIS 토큰 필요 ──
   const tokenRes = await fetch(`${KIS_VTS_BASE}/oauth2/tokenP`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ grant_type: "client_credentials", appkey: appKey, appsecret: appSecret }),
   });
-  if (!tokenRes.ok) return NextResponse.json({ error: "토큰 발급 실패" }, { status: 500 });
+  if (!tokenRes.ok) {
+    return NextResponse.json({
+      captured: 0,
+      tokenError: "KIS 토큰 발급 실패 (스냅샷 수집 스킵)",
+      ...(learningResult ? { learning: learningResult } : {}),
+    });
+  }
   const { access_token: token } = await tokenRes.json();
-
-  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
-
-  // 당일 이미 수집했으면 skip
-  const { data: existing } = await supabase.from("market_snapshots").select("id").eq("date", today).limit(1);
-  if (existing && existing.length > 0) {
-    return NextResponse.json({ skipped: true, reason: "당일 스냅샷 이미 존재" });
-  }
-
-  // watchlist 조회
-  const { data: watchlistData } = await supabase.from("watchlist").select("code, name").eq("active", true);
-  const watchlist = watchlistData || [];
-  if (watchlist.length === 0) {
-    return NextResponse.json({ skipped: true, reason: "watchlist 비어있음" });
-  }
 
   const kis = {
     "Content-Type": "application/json; charset=utf-8",
@@ -73,17 +90,6 @@ export async function GET(req: NextRequest) {
 
   if (snapshots.length > 0) {
     await supabase.from("market_snapshots").insert(snapshots);
-  }
-
-  // 주 1회 학습 실행: UTC 월요일 00:00 = KST 월요일 09:00
-  let learningResult: { confidence?: string; sampleSize?: number } | null = null;
-  const nowUtc = new Date();
-  const isLearningDay = nowUtc.getUTCDay() === 1; // UTC 월요일
-  if (isLearningDay) {
-    try {
-      const result = await runLearning();
-      learningResult = { confidence: result.confidence, sampleSize: result.sampleSize };
-    } catch { /* 학습 실패해도 observer 결과에 영향 없음 */ }
   }
 
   return NextResponse.json({

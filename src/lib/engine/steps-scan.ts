@@ -4,7 +4,7 @@ import {
 } from "@/lib/kis/indicators";
 import { getPrice, getDailyCandles, limitBuyOrder, getMinuteCandles } from "@/lib/engine/kis";
 import { hasDangerousDisclosure, getListingDate, applyStockFilter, applySectorFilter } from "@/lib/engine/filters";
-import { getInvestorTrend, scanSurgeStocks } from "@/lib/engine/market";
+import { getInvestorTrend, scanSurgeStocks, scanInstitutionalBuys } from "@/lib/engine/market";
 import { openPosition, recordTradeMemory, getOpenPosition, getSectorCounts, savePendingOrder } from "@/lib/engine/db";
 import { type EngineAction, type StepContext, type MarketTrend } from "@/lib/engine/types";
 import { sendTradeAlert } from "@/lib/engine/notify";
@@ -302,6 +302,116 @@ export async function runStep3(
         detail: `${surgeAdjustedScore}점 방향:${surgeLearnedSignal.side}(${surgeAdjustedStrength}) [${surgeLearnedSignal.raw.regime}] RSI:${surgeLearnedSignal.raw.rsi.toFixed(0)} MACD:${surgeLearnedSignal.raw.macdCrossover} MA:${surgeLearnedSignal.raw.ma5 > surgeLearnedSignal.raw.ma20 ? "↑" : "↓"}${surgeInvestorTag ? " " + surgeInvestorTag : ""}`,
       });
     }
+  }
+
+  return { actions, tradeCount, scannedCount };
+}
+
+// ═══ STEP 4: 기관 순매수 상위 종목 추종 매수 ═══
+export async function runStep4(
+  ctx: StepContext,
+  holdings: Record<string, string>[],
+  marketTrend: MarketTrend,
+  tradeCount: number,
+): Promise<{ actions: EngineAction[]; tradeCount: number; scannedCount: number }> {
+  const actions: EngineAction[] = [];
+  let scannedCount = 0;
+
+  let openPositionCount = holdings.filter((h) => Number(h.hldg_qty) > 0).length;
+  if (tradeCount >= ctx.maxDailyTrades || openPositionCount >= ctx.maxPositions) {
+    return { actions, tradeCount, scannedCount };
+  }
+
+  const cfg = ctx.config as unknown as Record<string, unknown>;
+  const minOrgn: number = typeof cfg.minInstitutionalBuy === "number" ? cfg.minInstitutionalBuy : 50;
+
+  const candidates = await scanInstitutionalBuys(ctx.config, minOrgn);
+  if (candidates.length === 0) return { actions, tradeCount, scannedCount };
+
+  const holdingCodes = new Set(holdings.map((h) => h.pdno));
+  const watchlistSet = new Set(ctx.config.watchlist ?? []);
+  const filtered = candidates.filter((c) => !holdingCodes.has(c.code) && !watchlistSet.has(c.code));
+  scannedCount += filtered.length;
+
+  const sectorCounts = await getSectorCounts();
+
+  for (const { code, name: candidateName, orgn, frgn } of filtered) {
+    if (tradeCount >= ctx.maxDailyTrades) break;
+    if (openPositionCount >= ctx.maxPositions) break;
+
+    const candles = await getDailyCandles(ctx.config, code);
+    await new Promise((r) => setTimeout(r, 200));
+    if (candles.length < 26) continue;
+
+    const minuteCandles = await getMinuteCandles(ctx.config, code);
+    await new Promise((r) => setTimeout(r, 200));
+
+    // 최소 기술 조건: RSI < 75, MA5 > MA20 (상승 추세, 과매수 아님)
+    const signal = analyzeSignal(candles, undefined, minuteCandles);
+    const rsiOk = signal.raw.rsi < 75;
+    const maOk  = signal.raw.ma5 > signal.raw.ma20;
+
+    if (!rsiOk || !maOk) {
+      actions.push({
+        type: "signal_skip", code, name: candidateName,
+        detail: `기관추종 조건 미충족: RSI ${signal.raw.rsi.toFixed(0)}${!rsiOk ? "(≥75)" : ""} MA${!maOk ? "(하락)" : ""}`,
+      });
+      continue;
+    }
+
+    const priceData = await getPrice(ctx.config, code);
+    const price = Number(priceData?.stck_prpr) || 0;
+    const name  = priceData?.hts_kor_isnm || candidateName;
+    if (price <= 0) continue;
+    await new Promise((r) => setTimeout(r, 200));
+
+    const listingDate = await getListingDate(ctx.config, code);
+    await new Promise((r) => setTimeout(r, 200));
+    const filter = applyStockFilter(priceData as Record<string, string>, listingDate);
+    if (!filter.passed) {
+      actions.push({ type: "filtered_out", code, name, detail: `종목 필터 탈락: ${filter.reason}` });
+      continue;
+    }
+
+    const sector = (priceData as Record<string, string>).bstp_kor_isnm || null;
+    const sectorFilter = applySectorFilter(sector, sectorCounts, ctx.maxPerSector);
+    if (!sectorFilter.passed) {
+      actions.push({ type: "skip", code, name, detail: sectorFilter.reason });
+      continue;
+    }
+
+    const dart = await hasDangerousDisclosure(code);
+    await new Promise((r) => setTimeout(r, 200));
+    if (dart.danger) {
+      actions.push({ type: "dart_filtered", code, name, detail: `DART 위험공시: ${dart.reason}` });
+      continue;
+    }
+
+    // 기관 추종 매수: 반액 고정 (분산 리스크 관리)
+    const qty = Math.floor((ctx.maxPerTrade * 0.5) / price);
+    if (qty <= 0) continue;
+
+    const result = await limitBuyOrder(ctx.config, code, qty, price);
+    const orgnLabel = `기관 ${orgn.toFixed(0)}억${frgn > 0 ? `+외국인 ${frgn.toFixed(0)}억` : ""}`;
+
+    actions.push({
+      type: result.success ? "orgn_follow_buy" : "buy_failed",
+      code, name,
+      detail: result.success
+        ? `기관추종 (${orgnLabel}) RSI:${signal.raw.rsi.toFixed(0)} MA:↑ → 지정가 ${result.limitPrice.toLocaleString()}원 ${qty}주`
+        : `기관추종 매수 실패 (${orgnLabel}): ${result.msg}`,
+    });
+
+    if (result.success) {
+      const syntheticScore = Math.round(orgn + (frgn > 0 ? frgn * 0.5 : 0));
+      await savePendingOrder({ stock_code: code, stock_name: name, order_no: result.ordNo ?? "", order_qty: qty, limit_price: result.limitPrice, signal_score: syntheticScore });
+      await openPosition(code, name, result.limitPrice, qty, { ...signal, strength: "strong", side: "buy", totalScore: syntheticScore, comment: `기관 추종 (${orgnLabel})` }, "initial", sector ?? undefined);
+      await recordTradeMemory({ code, name, baseSignal: signal, learnedSignal: signal, bonuses: { market: marketTrend.bonus, investor: Math.round(orgn * 2), snapshot: 0 }, adjustedScore: syntheticScore, weightsSource: "default", positionSize: qty * result.limitPrice });
+      await sendTradeAlert({ type: "buy", code, name, qty, price: result.limitPrice, score: syntheticScore });
+      tradeCount++;
+      openPositionCount++;
+    }
+    await new Promise((r) => setTimeout(r, 200));
   }
 
   return { actions, tradeCount, scannedCount };

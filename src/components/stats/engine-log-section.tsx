@@ -12,7 +12,7 @@ interface EngineAction {
 
 interface EngineRun {
   id: string;
-  created_at: string;
+  run_at: string;
   trade_count: number;
   scanned_count: number;
   duration_ms: number;
@@ -28,21 +28,21 @@ interface LogResponse {
 }
 
 const ACTION_META: Record<string, { label: string; emoji: string; color: string }> = {
-  approved_buy:    { label: "매수", emoji: "🟢", color: "#16A34A" },
-  split_buy_1:     { label: "분할매수1", emoji: "🟢", color: "#16A34A" },
-  split_buy_2:     { label: "분할매수2", emoji: "🟢", color: "#16A34A" },
-  surge_buy:       { label: "급등매수", emoji: "⚡", color: "#7C3AED" },
-  stop_loss:       { label: "손절", emoji: "🔴", color: "#DC2626" },
-  take_profit:     { label: "익절", emoji: "💰", color: "#2563EB" },
-  trailing_stop:   { label: "트레일링", emoji: "📉", color: "#EA580C" },
-  max_hold_sell:   { label: "기간청산", emoji: "⏰", color: "#D97706" },
-  sell:            { label: "매도", emoji: "🔵", color: "#2563EB" },
+  approved_buy:    { label: "매수", emoji: "🟢", color: "#E22929" },
+  split_buy_1:     { label: "분할매수1", emoji: "🟢", color: "#E22929" },
+  split_buy_2:     { label: "분할매수2", emoji: "🟢", color: "#E22929" },
+  surge_buy:       { label: "급등매수", emoji: "⚡", color: "#E22929" },
+  stop_loss:       { label: "손절", emoji: "📉", color: "#1554F0" },
+  take_profit:     { label: "익절", emoji: "💰", color: "#E22929" },
+  trailing_stop:   { label: "트레일링", emoji: "📉", color: "#1554F0" },
+  max_hold_sell:   { label: "기간청산", emoji: "⏰", color: "#1554F0" },
+  sell:            { label: "매도", emoji: "🔵", color: "#1554F0" },
   buy_failed:      { label: "매수실패", emoji: "❌", color: "#9CA3AF" },
   sell_failed:     { label: "매도실패", emoji: "❌", color: "#9CA3AF" },
   approved_buy_failed: { label: "매수실패", emoji: "❌", color: "#9CA3AF" },
   surge_buy_failed:    { label: "급등매수실패", emoji: "❌", color: "#9CA3AF" },
   skipped:         { label: "건너뜀", emoji: "⏭️", color: "#9CA3AF" },
-  token_error:     { label: "토큰오류", emoji: "🔑", color: "#DC2626" },
+  token_error:     { label: "토큰오류", emoji: "🔑", color: "#1554F0" },
 };
 
 function getActionMeta(type: string) {
@@ -71,7 +71,7 @@ function RunCard({ run }: { run: EngineRun }) {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: hasError ? "#DC2626" : COLORS.ink }}>
-            {formatKST(run.created_at)}
+            {formatKST(run.run_at)}
           </span>
           <span style={{ fontSize: 11, color: COLORS.dim }}>
             거래 {run.trade_count}건 · 스캔 {run.scanned_count}종목 · {(run.duration_ms / 1000).toFixed(1)}초

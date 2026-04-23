@@ -1,14 +1,19 @@
 import { supabase } from "@/lib/supabase/api-client";
 import {
-  analyzeSignal, analyzeSignalWithWeights, calcATR, calcDynamicRisk,
-  calcPositionSize, checkRisk, type AtrMultipliers, type SignalResult,
+  calcATR, calcDynamicRisk,
+  checkRisk, type AtrMultipliers, type SignalResult, type SignalRaw,
 } from "@/lib/kis/indicators";
-import { getPrice, getDailyCandles, getBalance, sellOrder, limitBuyOrder, cancelOpenBuyOrders } from "@/lib/engine/kis";
-import { hasDangerousDisclosure, getListingDate, applyStockFilter, applySectorFilter } from "@/lib/engine/filters";
-import { getMarketTrend, getInvestorTrend, scanSurgeStocks } from "@/lib/engine/market";
-import { openPosition, closePosition, recordTradeMemory, closeTradeMemory, getOpenPosition, getTodayRealizedLoss, getSectorCounts } from "@/lib/engine/db";
+import { getPrice, getDailyCandles, getBalance, sellOrder, limitBuyOrder, cancelOpenBuyOrders, checkOrderFill } from "@/lib/engine/kis";
+import { type DailyCandle } from "@/lib/kis/indicators";
+import { applySectorFilter, applyStockFilter, getListingDate } from "@/lib/engine/filters";
+import { getMarketTrend, getInvestorTrend } from "@/lib/engine/market";
+import { openPosition, closePosition, closeTradeMemory, getOpenPosition, getTodayRealizedLoss, getSectorCounts, updatePositionPhase, recordPartialExit, getPendingOrders, deletePendingOrder, savePendingOrder } from "@/lib/engine/db";
 import { type EngineAction, type StepContext, type MarketTrend } from "@/lib/engine/types";
 import { sendTradeAlert } from "@/lib/engine/notify";
+import { OPENING_BONUS_STRONG, OPENING_BONUS_MILD, OPENING_PENALTY_MILD, OPENING_PENALTY_STRONG, APPROVED_BUY_RATIO, SECOND_TP_RATIO, DEFAULT_MARKET_CRASH_THRESHOLD, OPENING_GAP_STRONG, OPENING_GAP_MILD, OPENING_GAP_DROP_STRONG, OPENING_GAP_DROP_MILD } from "@/lib/engine/constants";
+
+// 외부 신호(pending_signals)에서 openPosition 호출 시 사용하는 빈 SignalRaw placeholder
+const EMPTY_RAW: SignalRaw = { rsi: 0, macd: 0, macdSignal: 0, macdCrossover: "none", ma5: 0, ma20: 0, ema5: 0, ema20: 0, bbPosition: "middle", volumeRatio: 100, atr: 0, adx: 0, regime: "ranging", stochRsiK: 50, stochRsiD: 50, obvSlope: 0, disparity: 0, patternSellHit: false };
 
 // ─── 배치 병렬 패치 ─────────────────────────────────
 export async function batchFetch<T>(
@@ -38,10 +43,10 @@ export function getOpeningBonus(
   const snap = snapshotMap.get(code);
   if (!snap || snap.open_price <= 0) return 0;
   const gap = (snap.snapshot_price - snap.open_price) / snap.open_price;
-  if (gap > 0.01 && snap.snapshot_volume > 50000) return 15;
-  if (gap > 0.005) return 8;
-  if (gap < -0.02) return -20;
-  if (gap < -0.01) return -10;
+  if (gap > OPENING_GAP_STRONG && snap.snapshot_volume > 50000) return OPENING_BONUS_STRONG;
+  if (gap > OPENING_GAP_MILD) return OPENING_BONUS_MILD;
+  if (gap < OPENING_GAP_DROP_STRONG) return OPENING_PENALTY_STRONG;
+  if (gap < OPENING_GAP_DROP_MILD) return OPENING_PENALTY_MILD;
   return 0;
 }
 
@@ -69,10 +74,83 @@ export async function runStep0(ctx: StepContext): Promise<{
     actions.push({ type: "market_context", code: "", detail: `시장: ${marketTrend.label} (보정 ${marketTrend.bonus > 0 ? "+" : ""}${marketTrend.bonus}점)` });
   }
 
+  // ─── 승인 대기 신호 자동 만료 (2시간 초과) ──────────
+  try {
+    const { data: expiredSignals } = await supabase
+      .from("pending_signals")
+      .update({ status: "expired", resolved_at: new Date().toISOString() })
+      .eq("status", "pending")
+      .lt("created_at", new Date(Date.now() - 2 * 3600 * 1000).toISOString())
+      .select("id");
+    const expiredCount = expiredSignals?.length ?? 0;
+    if (expiredCount > 0) {
+      actions.push({ type: "signals_expired", code: "", detail: `승인 대기 만료: ${expiredCount}건` });
+    }
+  } catch { /* 만료 처리 실패가 엔진 실행에 영향 주지 않음 */ }
+
+  // ─── 미체결 주문 체결 확인 ────────────────────────
+  // Vercel 10s timeout 보호: 최대 5건만 처리 (나머지는 다음 크론에서 처리)
+  const pendingOrders = (await getPendingOrders()).slice(0, 5);
+  for (const order of pendingOrders) {
+    const fillResult = await checkOrderFill(ctx.config, order.order_no, order.stock_code);
+    if (fillResult.filled && fillResult.filledQty > 0) {
+      await deletePendingOrder(order.id);
+      // 고아 포지션 방지: 체결 확인 시점에 DB 포지션이 없으면 복구
+      // "initial" phase — 체결 직후이므로 아직 1차TP 이전 단계가 안전한 가정
+      const existingPos = await getOpenPosition(order.stock_code);
+      if (!existingPos) {
+        await openPosition(
+          order.stock_code,
+          order.stock_name ?? null,
+          fillResult.filledPrice,
+          fillResult.filledQty,
+          { strength: "weak", side: "buy", totalScore: order.signal_score ?? 0, comment: "체결 복구", indicators: [], raw: EMPTY_RAW, matchCount: 0 },
+          "initial",
+        );
+      }
+      actions.push({
+        type: "order_filled",
+        code: order.stock_code,
+        name: order.stock_name ?? order.stock_code,
+        detail: `체결 확인: ${fillResult.filledQty}주 @ ${fillResult.filledPrice.toLocaleString()}원`,
+      });
+    } else {
+      const ageMin = (Date.now() - new Date(order.created_at).getTime()) / 60000;
+      if (ageMin >= 30) {
+        await deletePendingOrder(order.id);
+        actions.push({
+          type: "order_cancelled_timeout",
+          code: order.stock_code,
+          name: order.stock_name ?? order.stock_code,
+          detail: `미체결 ${Math.round(ageMin)}분 경과 → 자동 삭제`,
+        });
+      }
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  // ─── 시장 급락 감지 ──────────────────────────────
+  const crashThreshold = ctx.config.marketCrashThreshold ?? DEFAULT_MARKET_CRASH_THRESHOLD;
+  const kospiRate = marketTrend.kospiRate;
+  if (kospiRate <= crashThreshold) {
+    return {
+      actions: [
+        ...actions,
+        {
+          type: "market_crash_halt", code: "",
+          detail: `시장 급락 감지 (KOSPI ${kospiRate.toFixed(2)}% ≤ ${crashThreshold}%)`,
+        },
+      ],
+      marketTrend,
+      halted: true,
+      haltReason: `시장 급락 감지 (KOSPI ${kospiRate.toFixed(2)}%)`,
+    };
+  }
+
   const todayLoss = await getTodayRealizedLoss();
   if (todayLoss <= ctx.dailyLossLimit) {
     return {
-      actions: [{ type: "daily_loss_halt", code: "", detail: `일일 손실 한도 도달 (${todayLoss.toFixed(1)}% ≤ ${ctx.dailyLossLimit}%)` }],
+      actions: [...actions, { type: "daily_loss_halt", code: "", detail: `일일 손실 한도 도달 (${todayLoss.toFixed(1)}% ≤ ${ctx.dailyLossLimit}%)` }],
       marketTrend,
       halted: true,
       haltReason: `일일 손실 한도 ${todayLoss.toFixed(1)}%`,
@@ -80,6 +158,108 @@ export async function runStep0(ctx: StepContext): Promise<{
   }
 
   return { actions, marketTrend, halted: false };
+}
+
+// ─── STEP 1 내부 헬퍼: 보유기간 초과 청산 ───────────
+async function executeMaxHoldSell(params: {
+  ctx: StepContext;
+  code: string;
+  name: string;
+  qty: number;
+  avgPrice: number;
+  currentPrice: number;
+  pos: { entry_date: string } | null;
+  maxHoldDays: number;
+}): Promise<{ actions: EngineAction[]; tradeCount: number }> {
+  const { ctx, code, name, qty, avgPrice, currentPrice, pos, maxHoldDays } = params;
+  const actions: EngineAction[] = [];
+  const holdDays = Math.ceil((Date.now() - new Date(pos!.entry_date).getTime()) / 86400000);
+
+  const result = await sellOrder(ctx.config, code, qty);
+  actions.push({
+    type: result.success ? "max_hold_sell" : "sell_failed", code, name,
+    detail: result.success
+      ? `보유 ${holdDays}일 초과 (최대 ${maxHoldDays}일) → 전량 청산 ${qty}주 (${result.msg})`
+      : `보유기간 초과 청산 실패: ${result.msg}`,
+  });
+
+  let tradeCount = 0;
+  if (result.success) {
+    const holdDaysVal = Math.max(1, Math.ceil((Date.now() - new Date(pos!.entry_date).getTime()) / 86400000));
+    const pnlPct = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
+    const pnlAmt = (currentPrice - avgPrice) * qty;
+    await closePosition(code, currentPrice, qty, "max_hold");
+    await closeTradeMemory(code, pnlPct, pnlAmt, holdDaysVal, "max_hold");
+    await sendTradeAlert({ type: "max_hold_sell", code, name, qty, price: currentPrice, pnlPct });
+    tradeCount++;
+  }
+  await new Promise((r) => setTimeout(r, 200));
+  return { actions, tradeCount };
+}
+
+// ─── STEP 1 내부 헬퍼: 2단계 익절 실행 ──────────────
+async function executePartialTakeProfit(params: {
+  ctx: StepContext;
+  code: string;
+  name: string;
+  qty: number;
+  avgPrice: number;
+  currentPrice: number;
+  pos: { entry_date: string; phase?: string } | null;
+  riskAction: string;
+  riskReason: string;
+}): Promise<{ actions: EngineAction[]; tradeCount: number }> {
+  const { ctx, code, name, qty, avgPrice, currentPrice, pos, riskAction, riskReason } = params;
+  const actions: EngineAction[] = [];
+  const currentPhase = pos?.phase ?? "initial";
+
+  if (currentPhase === "final_tp") {
+    actions.push({ type: "trailing_only", code, name, detail: `2차 익절 완료 상태 — 트레일링 스탑 대기 중` });
+    await new Promise((r) => setTimeout(r, 200));
+    return { actions, tradeCount: 0 };
+  }
+
+  const isSmallPosition = qty <= 3;
+  let sellQty: number;
+  let nextPhase: string;
+  let phaseLabel: string;
+
+  if (isSmallPosition || currentPhase === "initial") {
+    sellQty = isSmallPosition ? qty : Math.max(1, Math.floor(qty * ctx.takeProfitRatio / 100));
+    nextPhase = isSmallPosition ? "final_tp" : "partial_tp";
+    phaseLabel = isSmallPosition ? "전량 익절" : "1차 익절";
+  } else {
+    sellQty = Math.max(1, Math.floor(qty * SECOND_TP_RATIO / 100));
+    nextPhase = "final_tp";
+    phaseLabel = "2차 익절";
+  }
+
+  const result = await sellOrder(ctx.config, code, sellQty);
+  actions.push({
+    type: result.success ? riskAction : "sell_failed", code, name,
+    detail: result.success
+      ? `${phaseLabel}: ${riskReason} → 매도 ${sellQty}/${qty}주 (${result.msg})`
+      : `${phaseLabel} 매도 실패: ${result.msg}`,
+  });
+
+  let tradeCount = 0;
+  if (result.success) {
+    const sellPnlPct = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
+    const sellPnlAmt = (currentPrice - avgPrice) * sellQty;
+    const holdDaysVal = pos ? Math.max(1, Math.ceil((Date.now() - new Date(pos.entry_date).getTime()) / 86400000)) : 1;
+    const remainingQty = qty - sellQty;
+    if (remainingQty <= 0) {
+      await closePosition(code, currentPrice, sellQty, riskAction);
+      await closeTradeMemory(code, sellPnlPct, sellPnlAmt, holdDaysVal, riskAction);
+    } else {
+      // 부분익절: 가격·수량 기록 (최종 청산 시 블렌드 PnL 산출용)
+      await recordPartialExit(code, currentPrice, sellQty, nextPhase);
+    }
+    await sendTradeAlert({ type: "take_profit", code, name, qty: sellQty, price: currentPrice, pnlPct: sellPnlPct });
+    tradeCount++;
+  }
+  await new Promise((r) => setTimeout(r, 200));
+  return { actions, tradeCount };
 }
 
 // ═══ STEP 1: 보유종목 손절/익절/기간초과 감시 ═══
@@ -93,6 +273,11 @@ export async function runStep1(ctx: StepContext, marketTrend: MarketTrend): Prom
 
   const balanceData = await getBalance(ctx.config);
   const holdings: Record<string, string>[] = balanceData?.output1 || [];
+
+  const activeCodes = holdings.filter((h) => Number(h.hldg_qty) > 0).map((h) => h.pdno);
+  const candleMap = ctx.config.dynamicRisk
+    ? await batchFetch(activeCodes, (code) => getDailyCandles(ctx.config, code))
+    : new Map<string, DailyCandle[]>();
 
   for (const h of holdings) {
     const code = h.pdno;
@@ -110,15 +295,16 @@ export async function runStep1(ctx: StepContext, marketTrend: MarketTrend): Prom
     let holdTrailingStop = ctx.config.trailingStop ?? -3;
 
     if (ctx.config.dynamicRisk) {
-      const holdCandles = await getDailyCandles(ctx.config, code);
+      const holdCandles = candleMap.get(code) ?? [];
       if (holdCandles.length >= 15) {
         const holdAtr = calcATR(holdCandles);
         const dynamic = calcDynamicRisk(holdAtr, currentPrice, holdAtrMultipliers);
         holdStopLoss = dynamic.stopLoss;
         holdTakeProfit = dynamic.takeProfit;
         holdTrailingStop = dynamic.trailingStop;
+      } else {
+        actions.push({ type: "dynamic_risk_skipped", code, name, detail: `캔들 부족 (${holdCandles.length}개) — 기본값 적용` });
       }
-      await new Promise((r) => setTimeout(r, 200));
     }
 
     const risk = checkRisk(avgPrice, currentPrice, highPrice, holdStopLoss, holdTakeProfit, holdTrailingStop);
@@ -128,53 +314,67 @@ export async function runStep1(ctx: StepContext, marketTrend: MarketTrend): Prom
     if (pos && risk.action === "hold") {
       const holdDays = Math.ceil((Date.now() - new Date(pos.entry_date).getTime()) / 86400000);
       if (holdDays >= maxHoldDays) {
-        const result = await sellOrder(ctx.config, code, qty);
-        actions.push({
-          type: result.success ? "max_hold_sell" : "sell_failed", code, name,
-          detail: result.success
-            ? `보유 ${holdDays}일 초과 (최대 ${maxHoldDays}일) → 전량 청산 ${qty}주 (${result.msg})`
-            : `보유기간 초과 청산 실패: ${result.msg}`,
-        });
-        if (result.success) {
-          const holdDaysVal = Math.max(1, Math.ceil((Date.now() - new Date(pos.entry_date).getTime()) / 86400000));
-          const pnlPct = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
-          const pnlAmt = (currentPrice - avgPrice) * qty;
-          await closePosition(code, currentPrice, qty, "max_hold");
-          await closeTradeMemory(code, pnlPct, pnlAmt, holdDaysVal, "max_hold");
-          await sendTradeAlert({ type: "max_hold_sell", code, name, qty, price: currentPrice, pnlPct });
-          tradeCount++;
-        }
-        await new Promise((r) => setTimeout(r, 200));
+        const r = await executeMaxHoldSell({ ctx, code, name, qty, avgPrice, currentPrice, pos, maxHoldDays });
+        actions.push(...r.actions);
+        tradeCount += r.tradeCount;
         continue;
       }
     }
 
-    if (risk.action !== "hold") {
-      let sellQty = qty;
-      if (risk.action === "take_profit" && ctx.takeProfitRatio < 100) {
-        sellQty = Math.max(1, Math.floor(qty * ctx.takeProfitRatio / 100));
-      }
-
-      const result = await sellOrder(ctx.config, code, sellQty);
-      actions.push({
-        type: result.success ? risk.action : "sell_failed", code, name,
-        detail: result.success
-          ? `${risk.reason} → 매도 ${sellQty}/${qty}주 (${result.msg})`
-          : `${risk.reason} → 매도 실패: ${result.msg}`,
-      });
-
-      if (result.success) {
-        const sellPnlPct = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
-        const sellPnlAmt = (currentPrice - avgPrice) * sellQty;
-        const holdDaysVal = pos ? Math.max(1, Math.ceil((Date.now() - new Date(pos.entry_date).getTime()) / 86400000)) : 1;
-        if (sellQty >= qty) {
-          await closePosition(code, currentPrice, sellQty, risk.action);
-          await closeTradeMemory(code, sellPnlPct, sellPnlAmt, holdDaysVal, risk.action);
+    // 기관 순매도 전환 청산 (ATR 청산 조건이 없을 때만 체크)
+    if (risk.action === "hold") {
+      try {
+        const investor = await getInvestorTrend(ctx.config, code);
+        const orgnFlipThreshold = -100; // 기관 3일 합산 -100억 이하 시 청산
+        if (investor.orgn < orgnFlipThreshold) {
+          const result = await sellOrder(ctx.config, code, qty);
+          actions.push({
+            type: result.success ? "orgn_flip_sell" : "sell_failed", code, name,
+            detail: result.success
+              ? `기관 순매도 전환 청산 (${investor.orgn.toFixed(0)}억) → 매도 ${qty}주 (${result.msg})`
+              : `기관 청산 실패: ${result.msg}`,
+          });
+          if (result.success) {
+            const pnlPct = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
+            const pnlAmt = (currentPrice - avgPrice) * qty;
+            const holdDaysVal = pos ? Math.max(1, Math.ceil((Date.now() - new Date(pos.entry_date).getTime()) / 86400000)) : 1;
+            await closePosition(code, currentPrice, qty, "orgn_flip_sell");
+            await closeTradeMemory(code, pnlPct, pnlAmt, holdDaysVal, "orgn_flip_sell");
+            await sendTradeAlert({ type: "stop_loss", code, name, qty, price: currentPrice, pnlPct });
+            tradeCount++;
+          }
+          await new Promise((r) => setTimeout(r, 200));
+          continue;
         }
-        await sendTradeAlert({ type: risk.action as "sell" | "stop_loss" | "take_profit", code, name, qty: sellQty, price: currentPrice, pnlPct: sellPnlPct });
-        tradeCount++;
+      } catch { /* 기관 데이터 조회 실패 시 ATR 로직으로 폴백 */ }
+    }
+
+    if (risk.action !== "hold") {
+      if (risk.action === "take_profit") {
+        const r = await executePartialTakeProfit({ ctx, code, name, qty, avgPrice, currentPrice, pos, riskAction: risk.action, riskReason: risk.reason });
+        actions.push(...r.actions);
+        tradeCount += r.tradeCount;
+      } else {
+        // 손절 / 트레일링 / 기타: 기존 로직 유지
+        const result = await sellOrder(ctx.config, code, qty);
+        actions.push({
+          type: result.success ? risk.action : "sell_failed", code, name,
+          detail: result.success
+            ? `${risk.reason} → 매도 ${qty}주 (${result.msg})`
+            : `${risk.reason} → 매도 실패: ${result.msg}`,
+        });
+
+        if (result.success) {
+          const sellPnlPct = avgPrice > 0 ? ((currentPrice - avgPrice) / avgPrice) * 100 : 0;
+          const sellPnlAmt = (currentPrice - avgPrice) * qty;
+          const holdDaysVal = pos ? Math.max(1, Math.ceil((Date.now() - new Date(pos.entry_date).getTime()) / 86400000)) : 1;
+          await closePosition(code, currentPrice, qty, risk.action);
+          await closeTradeMemory(code, sellPnlPct, sellPnlAmt, holdDaysVal, risk.action);
+          await sendTradeAlert({ type: risk.action as "sell" | "stop_loss" | "take_profit", code, name, qty, price: currentPrice, pnlPct: sellPnlPct });
+          tradeCount++;
+        }
+        await new Promise((r) => setTimeout(r, 200));
       }
-      await new Promise((r) => setTimeout(r, 200));
     }
   }
 
@@ -189,13 +389,29 @@ export async function runStep15(
 ): Promise<{ actions: EngineAction[]; tradeCount: number }> {
   const actions: EngineAction[] = [];
 
-  const { data: approvedSignals } = await supabase.from("pending_signals")
-    .select("*").eq("status", "approved");
+  type PendingSignalRow = {
+    id: string;
+    stock_code: string;
+    stock_name?: string | null;
+    signal_score: number;
+    signal_comment?: string | null;
+    signal_data?: { qty_override?: number | string } | null;
+    source?: string | null;
+  };
+
+  // 조회와 동시에 status → "processing" 으로 전환 (중복 실행 방지)
+  // resolved_at IS NULL 조건으로 이미 다른 인스턴스가 처리 중인 행 제외
+  const { data: claimedSignals } = await supabase.from("pending_signals")
+    .update({ status: "processing", resolved_at: new Date().toISOString() })
+    .eq("status", "approved")
+    .is("resolved_at", null)
+    .select("*");
+  const approvedSignals = claimedSignals;
 
   const openCount = () => holdings.filter((h) => Number(h.hldg_qty) > 0).length;
   const sectorCounts15 = await getSectorCounts();
 
-  for (const sig of approvedSignals || []) {
+  for (const sig of (approvedSignals ?? []) as PendingSignalRow[]) {
     if (tradeCount >= ctx.maxDailyTrades) break;
     if (openCount() >= ctx.maxPositions) break;
     if (holdings.some((h) => h.pdno === sig.stock_code && Number(h.hldg_qty) > 0)) {
@@ -216,8 +432,17 @@ export async function runStep15(
       continue;
     }
 
-    const qtyOverride = sig.signal_data?.qty_override ? Number(sig.signal_data.qty_override) : 0;
-    const qty = qtyOverride > 0 ? qtyOverride : Math.floor((ctx.maxPerTrade * 0.5) / price);
+    // 수동매수 포함 모든 경로: 관리종목/정리매매 필터 적용
+    const listingDate15 = await getListingDate(ctx.config, sig.stock_code);
+    const stockFilter15 = applyStockFilter(priceData as Record<string, string>, listingDate15);
+    if (!stockFilter15.passed) {
+      actions.push({ type: "skip", code: sig.stock_code, name, detail: `종목 필터: ${stockFilter15.reason}` });
+      await supabase.from("pending_signals").update({ status: "expired", resolved_at: new Date().toISOString() }).eq("id", sig.id);
+      continue;
+    }
+
+    const qtyOverride = sig.signal_data?.qty_override ? Math.min(Number(sig.signal_data.qty_override), 10_000) : 0;
+    const qty = qtyOverride > 0 ? qtyOverride : Math.floor((ctx.maxPerTrade * APPROVED_BUY_RATIO) / price);
     if (qty <= 0) continue;
 
     const result = await limitBuyOrder(ctx.config, sig.stock_code, qty, price);
@@ -230,8 +455,21 @@ export async function runStep15(
     });
 
     if (result.success) {
-      await openPosition(sig.stock_code, name, result.limitPrice, qty, { strength: "weak", side: "buy", totalScore: sig.signal_score, comment: sig.signal_comment, indicators: [], raw: sig.signal_data || {}, matchCount: 0 } as SignalResult, "initial", sector15 ?? undefined);
+      await savePendingOrder({
+        stock_code: sig.stock_code,
+        stock_name: name,
+        order_no: result.ordNo ?? "",
+        order_qty: qty,
+        limit_price: result.limitPrice,
+        signal_score: sig.signal_score ?? null,
+      });
+      const existingPos15 = await getOpenPosition(sig.stock_code);
+      if (!existingPos15) {
+        await openPosition(sig.stock_code, name, result.limitPrice, qty, { strength: "weak", side: "buy", totalScore: sig.signal_score, comment: sig.signal_comment ?? "", indicators: [], raw: EMPTY_RAW, matchCount: 0 } as SignalResult, "initial", sector15 ?? undefined);
+      }
       await sendTradeAlert({ type: "buy", code: sig.stock_code, name, qty, price: result.limitPrice, score: sig.signal_score });
+      // 섹터 카운트 즉시 갱신 — 루프 내 중복 매수 방지
+      if (sector15) sectorCounts15.set(sector15, (sectorCounts15.get(sector15) ?? 0) + 1);
       tradeCount++;
     }
 
@@ -242,256 +480,3 @@ export async function runStep15(
   return { actions, tradeCount };
 }
 
-// ═══ STEP 2: 관심종목 신호 분석 (매수) ═══
-export async function runStep2(
-  ctx: StepContext,
-  holdings: Record<string, string>[],
-  marketTrend: MarketTrend,
-  snapshotMap: Map<string, { open_price: number; snapshot_price: number; snapshot_volume: number }>,
-  tradeCount: number
-): Promise<{ actions: EngineAction[]; tradeCount: number; scannedCount: number }> {
-  const actions: EngineAction[] = [];
-  let scannedCount = 0;
-
-  const sectorCounts = await getSectorCounts();
-
-  const watchlist: string[] = ctx.config.watchlist ?? [];
-  const availableWatchlist = watchlist.filter(
-    (code) => !holdings.some((h) => h.pdno === code && Number(h.hldg_qty) > 0)
-  );
-
-  const wCandleMap = await batchFetch(availableWatchlist, (code) => getDailyCandles(ctx.config, code));
-  const wInvestorMap = await batchFetch(availableWatchlist, (code) => getInvestorTrend(ctx.config, code));
-  scannedCount += availableWatchlist.length;
-
-  const openPositionCount = holdings.filter((h) => Number(h.hldg_qty) > 0).length;
-
-  for (const code of watchlist) {
-    if (tradeCount >= ctx.maxDailyTrades) break;
-    if (openPositionCount >= ctx.maxPositions) break;
-    if (!wCandleMap.has(code)) continue;
-
-    const candles = wCandleMap.get(code)!;
-    if (candles.length < 26) continue;
-
-    const baseSignal = analyzeSignal(candles);
-    const learnedSignal = ctx.customWeights ? analyzeSignalWithWeights(candles, ctx.customWeights) : baseSignal;
-
-    const openingBonus = getOpeningBonus(code, snapshotMap);
-    const investor = wInvestorMap.get(code) ?? { orgn: 0, frgn: 0, bonus: 0, label: "" };
-    const totalBonus = openingBonus + investor.bonus + marketTrend.bonus;
-    const adjustedScore = learnedSignal.totalScore + totalBonus;
-    const adjustedStrength = adjustedScore >= 70 ? "strong" : adjustedScore >= 40 ? "weak" : "none";
-    const weightsSource: "learned" | "default" = ctx.customWeights ? "learned" : "default";
-    const bonusTag = [
-      openingBonus !== 0 ? `장초반 ${openingBonus > 0 ? "+" : ""}${openingBonus}` : "",
-      investor.label ? `[${investor.label}]` : "",
-      marketTrend.label ? `[${marketTrend.label}]` : "",
-    ].filter(Boolean).join(" ");
-
-    if (adjustedStrength === "strong" && learnedSignal.side === "buy") {
-      const priceData = await getPrice(ctx.config, code);
-      const price = Number(priceData?.stck_prpr) || 0;
-      const name = priceData?.hts_kor_isnm || code;
-      if (price <= 0) continue;
-
-      const listingDate = await getListingDate(ctx.config, code);
-      await new Promise((r) => setTimeout(r, 200));
-      const filter = applyStockFilter(priceData as Record<string, string>, listingDate);
-      if (!filter.passed) {
-        actions.push({ type: "filtered_out", code, name, detail: `종목 필터 탈락: ${filter.reason}` });
-        continue;
-      }
-
-      const sector = (priceData as Record<string, string>).bstp_kor_isnm || null;
-      const sectorFilter = applySectorFilter(sector, sectorCounts, ctx.maxPerSector);
-      if (!sectorFilter.passed) {
-        actions.push({ type: "skip", code, name, detail: sectorFilter.reason });
-        continue;
-      }
-
-      const dart = await hasDangerousDisclosure(code);
-      await new Promise((r) => setTimeout(r, 200));
-      if (dart.danger) {
-        actions.push({ type: "dart_filtered", code, name, detail: `DART 위험공시 탈락: ${dart.reason}` });
-        continue;
-      }
-
-      const existingPos = await getOpenPosition(code);
-      const buyRatio = existingPos?.phase === "initial" ? 1 : 0.5;
-      const positionSize = calcPositionSize(
-        learnedSignal.raw.atr, price,
-        ctx.applied.targetRiskAmount, ctx.maxPerTrade, ctx.applied.atrMultipliers.stop
-      );
-      const qty = Math.floor((positionSize * buyRatio) / price);
-      if (qty <= 0) continue;
-
-      const result = await limitBuyOrder(ctx.config, code, qty, price);
-      const phase = existingPos ? "full" : "initial";
-      actions.push({
-        type: result.success ? (phase === "initial" ? "split_buy_1" : "split_buy_2") : "buy_failed",
-        code, name,
-        detail: result.success
-          ? `${adjustedScore}점 (${learnedSignal.raw.regime}) B:${baseSignal.totalScore}/L:${learnedSignal.totalScore} ${bonusTag} → ${phase === "initial" ? "1차" : "2차"} 지정가 ${result.limitPrice.toLocaleString()}원 ${qty}주 (${result.msg})`
-          : `${adjustedScore}점 ${bonusTag} → 매수 실패: ${result.msg}`,
-      });
-
-      if (result.success) {
-        if (!existingPos) {
-          await openPosition(code, name, result.limitPrice, qty, { ...learnedSignal, totalScore: adjustedScore }, "initial", sector ?? undefined);
-          await recordTradeMemory({
-            code, name, baseSignal, learnedSignal,
-            bonuses: { market: marketTrend.bonus, investor: investor.bonus, snapshot: openingBonus },
-            adjustedScore, weightsSource, positionSize: qty * result.limitPrice,
-          });
-        }
-        await sendTradeAlert({ type: "buy", code, name, qty, price: result.limitPrice, score: adjustedScore });
-        tradeCount++;
-      }
-      await new Promise((r) => setTimeout(r, 200));
-
-    } else if (adjustedStrength === "weak" && learnedSignal.side === "buy") {
-      const priceData = await getPrice(ctx.config, code);
-      const name = priceData?.hts_kor_isnm || code;
-      try {
-        await supabase.from("pending_signals").insert({
-          stock_code: code, stock_name: name,
-          signal_score: adjustedScore,
-          signal_comment: `${learnedSignal.comment}${bonusTag}`,
-          signal_data: { indicators: learnedSignal.indicators, raw: learnedSignal.raw, matchCount: learnedSignal.matchCount, openingBonus, institutionalBonus: investor.bonus },
-          source: "watchlist", status: "pending",
-        });
-      } catch { /* ignore */ }
-
-      actions.push({
-        type: "pending_approval", code, name,
-        detail: `약한 신호 ${adjustedScore}점${bonusTag} → DB 저장, 승인 대기. ${learnedSignal.comment}`,
-      });
-      await new Promise((r) => setTimeout(r, 200));
-    }
-  }
-
-  return { actions, tradeCount, scannedCount };
-}
-
-// ═══ STEP 3: KOSPI + KOSDAQ 급등주 스캔 ═══
-export async function runStep3(
-  ctx: StepContext,
-  holdings: Record<string, string>[],
-  marketTrend: MarketTrend,
-  tradeCount: number
-): Promise<{ actions: EngineAction[]; tradeCount: number; scannedCount: number }> {
-  const actions: EngineAction[] = [];
-  let scannedCount = 0;
-
-  const openPositionCount = holdings.filter((h) => Number(h.hldg_qty) > 0).length;
-  if (tradeCount >= ctx.maxDailyTrades || openPositionCount >= ctx.maxPositions) return { actions, tradeCount, scannedCount };
-
-  const sectorCounts3 = await getSectorCounts();
-
-  const surgeStocks = await scanSurgeStocks(ctx.config);
-  const holdingCodes = new Set(holdings.map((h) => h.pdno));
-  const watchlistSet = new Set(ctx.config.watchlist ?? []);
-  const candidates = surgeStocks.filter((c) => !holdingCodes.has(c) && !watchlistSet.has(c));
-
-  const sCandleMap = await batchFetch(candidates, (code) => getDailyCandles(ctx.config, code));
-  const sInvestorMap = await batchFetch(candidates, (code) => getInvestorTrend(ctx.config, code));
-  scannedCount += candidates.length;
-
-  for (const code of candidates) {
-    if (tradeCount >= ctx.maxDailyTrades) break;
-
-    const candles = sCandleMap.get(code) ?? [];
-    if (candles.length < 26) continue;
-
-    const surgeBaseSignal = analyzeSignal(candles);
-    const surgeLearnedSignal = ctx.customWeights ? analyzeSignalWithWeights(candles, ctx.customWeights) : surgeBaseSignal;
-    const surgeInvestor = sInvestorMap.get(code) ?? { orgn: 0, frgn: 0, bonus: 0, label: "" };
-    const surgeAdjustedScore = surgeLearnedSignal.totalScore + surgeInvestor.bonus + marketTrend.bonus;
-    const surgeAdjustedStrength = surgeAdjustedScore >= 70 ? "strong" : surgeAdjustedScore >= 40 ? "weak" : "none";
-    const surgeWeightsSource: "learned" | "default" = ctx.customWeights ? "learned" : "default";
-    const surgeInvestorTag = [
-      surgeInvestor.label ? `[${surgeInvestor.label}]` : "",
-      marketTrend.label ? `[${marketTrend.label}]` : "",
-    ].filter(Boolean).join(" ");
-
-    if (surgeAdjustedStrength === "strong" && surgeLearnedSignal.side === "buy") {
-      const priceData = await getPrice(ctx.config, code);
-      const price = Number(priceData?.stck_prpr) || 0;
-      const name = priceData?.hts_kor_isnm || code;
-      if (price <= 0) continue;
-
-      const surgeListing = await getListingDate(ctx.config, code);
-      await new Promise((r) => setTimeout(r, 200));
-      const surgeFilter = applyStockFilter(priceData as Record<string, string>, surgeListing);
-      if (!surgeFilter.passed) {
-        actions.push({ type: "filtered_out", code, name, detail: `급등주 필터 탈락: ${surgeFilter.reason}` });
-        continue;
-      }
-
-      const surgeSector = (priceData as Record<string, string>).bstp_kor_isnm || null;
-      const surgeSectorFilter = applySectorFilter(surgeSector, sectorCounts3, ctx.maxPerSector);
-      if (!surgeSectorFilter.passed) {
-        actions.push({ type: "skip", code, name, detail: surgeSectorFilter.reason });
-        continue;
-      }
-
-      const surgeDart = await hasDangerousDisclosure(code);
-      await new Promise((r) => setTimeout(r, 200));
-      if (surgeDart.danger) {
-        actions.push({ type: "dart_filtered", code, name, detail: `급등주 DART 위험공시 탈락: ${surgeDart.reason}` });
-        continue;
-      }
-
-      const surgePositionSize = calcPositionSize(
-        surgeLearnedSignal.raw.atr, price,
-        ctx.applied.targetRiskAmount, ctx.maxPerTrade, ctx.applied.atrMultipliers.stop
-      );
-      const qty = Math.floor((surgePositionSize * 0.5) / price);
-      if (qty <= 0) continue;
-
-      const result = await limitBuyOrder(ctx.config, code, qty, price);
-      actions.push({
-        type: result.success ? "surge_buy" : "surge_buy_failed", code, name,
-        detail: result.success
-          ? `급등주 ${surgeAdjustedScore}점 (${surgeLearnedSignal.raw.regime}) B:${surgeBaseSignal.totalScore}/L:${surgeLearnedSignal.totalScore}${surgeInvestorTag} → 1차 지정가 ${result.limitPrice.toLocaleString()}원 ${qty}주 (${result.msg})`
-          : `급등주 ${surgeAdjustedScore}점${surgeInvestorTag} → 매수 실패: ${result.msg}`,
-      });
-
-      if (result.success) {
-        await openPosition(code, name, result.limitPrice, qty, { ...surgeLearnedSignal, totalScore: surgeAdjustedScore }, "initial", surgeSector ?? undefined);
-        await recordTradeMemory({
-          code, name,
-          baseSignal: surgeBaseSignal, learnedSignal: surgeLearnedSignal,
-          bonuses: { market: marketTrend.bonus, investor: surgeInvestor.bonus, snapshot: 0 },
-          adjustedScore: surgeAdjustedScore, weightsSource: surgeWeightsSource,
-          positionSize: qty * result.limitPrice,
-        });
-        await sendTradeAlert({ type: "surge_buy", code, name, qty, price: result.limitPrice, score: surgeAdjustedScore });
-        tradeCount++;
-      }
-      await new Promise((r) => setTimeout(r, 200));
-
-    } else if (surgeAdjustedStrength === "weak" && surgeLearnedSignal.side === "buy") {
-      const priceData2 = await getPrice(ctx.config, code);
-      const surgeName = priceData2?.hts_kor_isnm || code;
-      try {
-        await supabase.from("pending_signals").insert({
-          stock_code: code, stock_name: surgeName,
-          signal_score: surgeAdjustedScore,
-          signal_comment: `${surgeLearnedSignal.comment}${surgeInvestorTag}`,
-          signal_data: { indicators: surgeLearnedSignal.indicators, raw: surgeLearnedSignal.raw, matchCount: surgeLearnedSignal.matchCount, institutionalBonus: surgeInvestor.bonus },
-          source: "surge", status: "pending",
-        });
-      } catch { /* ignore */ }
-
-      actions.push({
-        type: "surge_pending", code, name: surgeName,
-        detail: `급등주 약한 ${surgeAdjustedScore}점${surgeInvestorTag} → DB 저장, 승인 대기. ${surgeLearnedSignal.comment}`,
-      });
-      await new Promise((r) => setTimeout(r, 200));
-    }
-  }
-
-  return { actions, tradeCount, scannedCount };
-}

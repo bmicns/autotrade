@@ -66,7 +66,7 @@ export function SignalTab() {
               body: JSON.stringify({
                 stockCode: signal.stock_code,
                 side: "buy",
-                quantity: 1,
+                quantity: (signal.signal_data?.qty_override as number) || 1,
                 price: 0,
                 orderType: "01",
               }),

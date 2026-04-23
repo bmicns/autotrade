@@ -8,6 +8,7 @@ import type { StockStat } from "@/components/stats/stock-stats-section";
 export type Period = "1w" | "1m" | "3m" | "all";
 
 export interface StatsData extends PerformanceStats {
+  dataSource?: "db" | "engine_runs" | "empty";
   positions?: Array<{
     id: string; stock_code: string; stock_name: string | null;
     entry_price: number; exit_price: number | null; entry_date: string;

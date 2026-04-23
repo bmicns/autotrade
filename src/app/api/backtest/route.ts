@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     }
 
     // KIS 인증 정보
-    const { data: kisConfig } = await supabase.from("kis_config").select("*").limit(1).single();
+    const { data: kisConfig } = await supabase.from("kis_config").select("*").limit(1).maybeSingle();
     if (!kisConfig?.token) {
       return NextResponse.json({ error: "KIS 연결이 필요합니다" }, { status: 400 });
     }

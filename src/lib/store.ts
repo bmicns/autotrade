@@ -9,6 +9,8 @@ export interface Holding {
   market: string;
   quantity: number;
   avgPrice: number;
+  currentPrice?: number;
+  pnlRate?: number;
 }
 
 export interface StockPrice {
@@ -55,6 +57,8 @@ export interface TradeSettings {
   morningEnd: string;           // 오전 세션 종료
   afternoonStart: string;       // 오후 세션 시작
   afternoonEnd: string;         // 오후 세션 종료
+  dailyLossLimit: number;       // 일일 손실 한도 (%)
+  maxHoldDays: number;          // 최대 보유 기간 (일)
 }
 
 interface AppState {
@@ -71,6 +75,9 @@ interface AppState {
 
   // 실시간 시세 (KIS에서 가져온 데이터)
   prices: Map<string, StockPrice>;
+
+  // 종목별 캔들(일봉) 데이터 — 최근 10일 종가
+  candles: Map<string, number[]>;
 
   // 계좌 정보
   totalEval: number;
@@ -139,6 +146,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   prices: new Map(),
+  candles: new Map(),
   totalEval: 0,
   totalPnl: 0,
   totalPnlRate: 0,
@@ -158,6 +166,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     takeProfit: 5,
     takeProfitRatio: 50,
     trailingStop: 3,
+    dailyLossLimit: 3,
+    maxHoldDays: 5,
     morningStart: "09:30",
     morningEnd: "11:30",
     afternoonStart: "13:00",
@@ -253,6 +263,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           market: h.market,
           quantity: h.quantity,
           avgPrice: h.avgPrice,
+          currentPrice: h.currentPrice,
+          pnlRate: h.pnlRate,
         }));
         saveToStorage("nx-holdings", holdings);
         set({
@@ -269,6 +281,23 @@ export const useAppStore = create<AppState>((set, get) => ({
           const codes = holdings.map((h) => h.code);
           const priceMap = await fetchPrices(config, codes);
           set({ prices: priceMap });
+
+          // 캔들 데이터 일괄 조회 (batch endpoint)
+          try {
+            const batchRes = await fetch("/api/kis/candles/batch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ codes }),
+            });
+            if (batchRes.ok) {
+              const batchData = await batchRes.json();
+              const candleMap = new Map<string, number[]>(
+                Object.entries(batchData.candles as Record<string, number[]>)
+                  .filter(([, v]) => v.length > 0)
+              );
+              set({ candles: candleMap });
+            }
+          } catch { /* 캔들 조회 실패 무시 */ }
         }
       } else {
         set({ kisConnected: false });

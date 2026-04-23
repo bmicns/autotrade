@@ -1,5 +1,13 @@
 // ─── 엔진 공통 타입 ──────────────────────────────
 
+// ─── 국면별 파라미터 세트 ─────────────────────────
+export interface RegimeParams {
+  rsiBuy: number;
+  rsiSell: number;
+  strongScore: number;
+  weakScore: number;
+}
+
 export interface EngineConfig {
   appKey: string;
   appSecret: string;
@@ -14,8 +22,15 @@ export interface EngineConfig {
   dailyLossLimit: number;    // #5 일일 최대 손실 한도 (%)
   maxHoldDays: number;       // 최대 보유 기간 (일)
   dynamicRisk: boolean;      // #2 ATR 동적 손절 사용 여부
+  marketCrashThreshold?: number;  // 시장 급락 중단 임계값 (기본 -2.0)
   watchlist?: string[];
   maxPositions?: number;  // 동시 보유 종목 상한 (기본 5)
+  rsiBuy?: number;        // RSI 매수 임계값 (기본 30)
+  rsiSell?: number;       // RSI 매도 임계값 (기본 70)
+  strongScore?: number;   // 강한 신호 점수 기준 (기본 70)
+  weakScore?: number;     // 약한 신호 점수 기준 (기본 40)
+  trendingParams?: RegimeParams;  // 추세장 파라미터 (없으면 기본값 사용)
+  rangingParams?: RegimeParams;   // 횡보장 파라미터
 }
 
 export interface InvestorTrend {
@@ -59,6 +74,19 @@ export interface EngineAction {
   detail: string;
 }
 
+// KIS 주가 조회 응답 공통 필드 (inquire-price output)
+export interface KISPriceOutput {
+  stck_prpr?: string;   // 현재가
+  hts_kor_isnm?: string; // 종목명
+  stck_oprc?: string;   // 시가
+  stck_hgpr?: string;   // 고가
+  bstp_kor_isnm?: string; // 업종명
+  mang_issu_yn?: string; // 관리종목 여부
+  mrkt_warn_cls_code?: string; // 시장경고 코드
+  lstg_date?: string;   // 상장일
+  [key: string]: string | undefined;
+}
+
 export interface StepContext {
   config: EngineConfig;
   applied: import("@/lib/learning").AppliedLearning;
@@ -68,5 +96,9 @@ export interface StepContext {
   maxPerSector: number;  // 섹터당 최대 보유 종목 수 (0이면 비활성)
   takeProfitRatio: number;
   dailyLossLimit: number;
+  strongScore: number;    // 강한 신호 점수 기준
+  weakScore: number;      // 약한 신호 점수 기준
+  rsiBuy: number;         // RSI 매수 임계값
+  rsiSell: number;        // RSI 매도 임계값
   customWeights: { trending: Record<string, number>; ranging: Record<string, number> } | undefined;
 }

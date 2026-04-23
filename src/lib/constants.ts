@@ -36,4 +36,6 @@ export const KIS_TR = {
   WS_EXECUTION: "H0STCNI9",
   INVESTOR_TREND: "FHKST01010900",  // 투자자별 매매동향
   OPEN_ORDERS: "VTTC8036R",         // 미체결 조회
+  MINUTE_CHART: "FHKST03010200",    // 분봉 (VWAP/Volume Profile용)
+  INST_RANKING: "FHPST02320000",    // 기관/외국인 순매수 상위 종목
 } as const;

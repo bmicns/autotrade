@@ -3,15 +3,22 @@ import { KIS_VTS_BASE } from "@/lib/constants";
 import { type EngineConfig, type FilterResult } from "./types";
 import { headers } from "./kis";
 
+const ONE_YEAR_MS = 366 * 86400000; // 366일 — 윤년 포함 1년 이상 보장
+
+const DANGER_KEYWORDS = [
+  "유상증자", "전환사채", "신주인수권", "감사의견 거절", "감사의견 한정",
+  "영업정지", "상장폐지", "횡령", "배임", "불성실공시",
+];
+
 // ─── DART 공시 필터 ──────────────────────────────
 export async function hasDangerousDisclosure(code: string): Promise<{ danger: boolean; reason: string }> {
   const apiKey = process.env.DART_API_KEY;
+  // DART_API_KEY 미설정 시 위험 공시 필터가 무력화됨 — Vercel 환경변수 등록 권장
   if (!apiKey) return { danger: false, reason: "" };
   try {
     // 최근 30일 공시 조회
     const endDate = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10).replace(/-/g, "");
     const startDate = new Date(Date.now() + 9 * 3600000 - 30 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
-    // stock_code 기준 조회
     const params2 = new URLSearchParams({
       crtfc_key: apiKey,
       stock_code: code,
@@ -25,12 +32,6 @@ export async function hasDangerousDisclosure(code: string): Promise<{ danger: bo
     if (!res.ok) return { danger: false, reason: "" };
     const data = await res.json();
     if (data.status !== "000") return { danger: false, reason: "" };
-
-    // 위험 공시 키워드
-    const DANGER_KEYWORDS = [
-      "유상증자", "전환사채", "신주인수권", "감사의견 거절", "감사의견 한정",
-      "영업정지", "상장폐지", "횡령", "배임", "불성실공시",
-    ];
     const disclosures: Array<{ report_nm: string }> = data.list || [];
     for (const d of disclosures) {
       const matched = DANGER_KEYWORDS.find((kw) => d.report_nm.includes(kw));
@@ -99,7 +100,7 @@ export function applyStockFilter(priceData: Record<string, string>, listingDate:
     const listed = new Date(
       `${listingDate.slice(0, 4)}-${listingDate.slice(4, 6)}-${listingDate.slice(6, 8)}`,
     );
-    const oneYearAgo = new Date(Date.now() - 365 * 86400000);
+    const oneYearAgo = new Date(Date.now() - ONE_YEAR_MS);
     if (listed > oneYearAgo) {
       const months = Math.floor((Date.now() - listed.getTime()) / (30 * 86400000));
       reasons.push(`상장 ${months}개월 (1년 미만)`);

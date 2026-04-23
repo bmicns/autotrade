@@ -63,45 +63,51 @@ export function BacktestSection() {
       </h3>
 
       {/* 설정 */}
-      <div style={{ ...S.card, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end", marginBottom: 16 }}>
-        <div style={{ flex: "1 1 140px" }}>
-          <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.dim, display: "block", marginBottom: 4 }}>종목</label>
-          <select
-            value={selectedCode}
-            onChange={(e) => setSelectedCode(e.target.value)}
-            style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.line}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink }}
+      <div style={{ ...S.card, display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+        {/* 1행: 종목 + 실행 */}
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.dim, display: "block", marginBottom: 4 }}>종목</label>
+            <select
+              value={selectedCode}
+              onChange={(e) => setSelectedCode(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.line}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink }}
+            >
+              {watchlist.map((w) => (
+                <option key={w.code} value={w.code}>{w.name ?? w.code} ({w.code})</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={runTest}
+            disabled={loading || !selectedCode}
+            style={{
+              flexShrink: 0, padding: "9px 20px", fontSize: 14, fontWeight: 700,
+              border: "none", borderRadius: 8, background: COLORS.hero, color: "#FFF",
+              cursor: loading ? "wait" : "pointer", opacity: loading ? 0.6 : 1,
+            }}
           >
-            {watchlist.map((w) => (
-              <option key={w.code} value={w.code}>{w.name ?? w.code} ({w.code})</option>
-            ))}
-          </select>
+            {loading ? "분석 중..." : "실행"}
+          </button>
         </div>
-        <div style={{ flex: "0 0 80px" }}>
-          <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.dim, display: "block", marginBottom: 4 }}>손절 %</label>
-          <input type="number" value={stopLoss} onChange={(e) => setStopLoss(Number(e.target.value))}
-            style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.line}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink }} />
+        {/* 2행: 손절 / 익절 / 트레일링 */}
+        <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.fall, display: "block", marginBottom: 4 }}>손절 %</label>
+            <input type="number" value={stopLoss} onChange={(e) => setStopLoss(Number(e.target.value))}
+              style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.fallB}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink, boxSizing: "border-box" }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.rise, display: "block", marginBottom: 4 }}>익절 %</label>
+            <input type="number" value={takeProfit} onChange={(e) => setTakeProfit(Number(e.target.value))}
+              style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.riseB}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink, boxSizing: "border-box" }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.fall, display: "block", marginBottom: 4 }}>트레일링 %</label>
+            <input type="number" value={trailingStop} onChange={(e) => setTrailingStop(Number(e.target.value))}
+              style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.fallB}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink, boxSizing: "border-box" }} />
+          </div>
         </div>
-        <div style={{ flex: "0 0 80px" }}>
-          <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.dim, display: "block", marginBottom: 4 }}>익절 %</label>
-          <input type="number" value={takeProfit} onChange={(e) => setTakeProfit(Number(e.target.value))}
-            style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.line}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink }} />
-        </div>
-        <div style={{ flex: "0 0 80px" }}>
-          <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.dim, display: "block", marginBottom: 4 }}>트레일링 %</label>
-          <input type="number" value={trailingStop} onChange={(e) => setTrailingStop(Number(e.target.value))}
-            style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.line}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink }} />
-        </div>
-        <button
-          onClick={runTest}
-          disabled={loading || !selectedCode}
-          style={{
-            flex: "0 0 auto", padding: "9px 20px", fontSize: 14, fontWeight: 700,
-            border: "none", borderRadius: 8, background: COLORS.hero, color: "#FFF",
-            cursor: loading ? "wait" : "pointer", opacity: loading ? 0.6 : 1,
-          }}
-        >
-          {loading ? "분석 중..." : "실행"}
-        </button>
       </div>
 
       {error && (

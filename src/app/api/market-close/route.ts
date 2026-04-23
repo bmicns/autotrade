@@ -1,38 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase/api-client";
 import { cancelOpenBuyOrders } from "@/lib/engine/kis";
-import { getBalance } from "@/lib/kis/api";
+import { getBalance, getToken } from "@/lib/kis/api";
 import { sendMarketCloseAlert } from "@/lib/engine/notify";
 import type { EngineConfig } from "@/lib/engine/types";
+type MinConfig = Pick<EngineConfig, "appKey" | "appSecret" | "accountNo" | "token">;
 
-export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  if (!process.env.CRON_SECRET) return NextResponse.json({ error: "CRON_SECRET 미설정" }, { status: 500 });
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export async function GET(_req: NextRequest) {
   try {
     // KIS 설정 로드
-    const { data: kisConfig } = await supabase.from("kis_config").select("*").limit(1).single();
-    if (!kisConfig?.token) {
-      return NextResponse.json({ error: "KIS 연결 필요" }, { status: 400 });
+    const { data: kisConfig } = await supabase.from("kis_config").select("*").limit(1).maybeSingle();
+    if (!kisConfig?.app_key || !kisConfig?.app_secret || !kisConfig?.account_no) {
+      return NextResponse.json({ error: "KIS app_key/app_secret/account_no 미설정" }, { status: 400 });
     }
 
-    const config: EngineConfig = {
+    // 토큰이 없거나 만료된 경우 자동 재발급
+    let token: string = kisConfig.token ?? "";
+    if (!token) {
+      try {
+        token = await getToken(kisConfig.app_key, kisConfig.app_secret);
+        await supabase.from("kis_config").update({ token, updated_at: new Date().toISOString() }).eq("id", "default");
+      } catch {
+        return NextResponse.json({ error: "KIS 토큰 자동 발급 실패 — 수동 재연결 필요" }, { status: 503 });
+      }
+    }
+
+    const config: MinConfig = {
       appKey: kisConfig.app_key,
       appSecret: kisConfig.app_secret,
       accountNo: kisConfig.account_no,
-      token: kisConfig.token,
-      stopLoss: -5,
-      takeProfit: 5,
-      trailingStop: -3,
-      maxPerTrade: 1000000,
-      maxDailyTrades: 10,
-      takeProfitRatio: 50,
-      dailyLossLimit: -3,
-      dynamicRisk: true,
-      maxHoldDays: 5,
+      token,
     };
 
     // 1. 미체결 매수 주문 전량 취소

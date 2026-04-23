@@ -51,7 +51,7 @@ export const supabase = createClient(
 | entry_qty | int | 매수 수량 |
 | entry_signal | jsonb | 진입 시그널 전체 객체 |
 | signal_strength | numeric | 시그널 강도 |
-| phase | text | `"initial"` \| `"full"` |
+| phase | text | `"initial"` \| `"full"` \| `"partial_tp"` \| `"final_tp"` |
 | status | text | `"open"` \| `"closed"` |
 | exit_price | numeric | 청산 단가 |
 | exit_qty | int | 청산 수량 |
@@ -231,6 +231,61 @@ KIS(한국투자증권) API 자격증명 단일 레코드 테이블. `id = "defa
 | snapshot_price | 스냅샷 시점 가격 |
 | snapshot_volume | 스냅샷 시점 거래량 |
 
+### pending_orders
+
+미체결 지정가 매수 주문 추적 테이블. STEP 0이 매 실행마다 이 테이블을 폴링하여 KIS API로 체결 여부를 확인한다. 30분이 경과해도 미체결이면 자동 삭제된다.
+
+마이그레이션: `supabase/migrations/20260420000000_pending_orders.sql`
+
+```sql
+CREATE TABLE IF NOT EXISTS pending_orders (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  stock_code text NOT NULL,
+  stock_name text,
+  order_no text NOT NULL,
+  order_qty integer NOT NULL,
+  limit_price integer NOT NULL,
+  signal_score integer,
+  created_at timestamptz DEFAULT now()
+);
+```
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid | PK |
+| stock_code | text | 종목코드 |
+| stock_name | text | 종목명 |
+| order_no | text | KIS 주문번호 |
+| order_qty | integer | 주문 수량 |
+| limit_price | integer | 지정가 |
+| signal_score | integer | 시그널 점수 |
+| created_at | timestamptz | 주문 생성 시각 (30분 경과 미체결 시 자동 삭제 기준) |
+
+### portfolio_snapshots
+
+일별 포트폴리오 총 평가금액 스냅샷 테이블. 엔진이 KST 15:00 이후(장 마감 후) 하루 한 번 저장한다.
+
+마이그레이션: `supabase/migrations/20260420000001_portfolio_snapshots.sql`
+
+```sql
+CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  snapshot_date date NOT NULL UNIQUE,
+  total_eval integer NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+```
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid | PK |
+| snapshot_date | date | 스냅샷 날짜 (UNIQUE — 하루 1건) |
+| total_eval | integer | 총 평가금액 (원) |
+| created_at | timestamptz | 저장 일시 |
+
+- **용도**: MDD, 7일 수익률, 30일 수익률 계산에 사용 (포트폴리오 UI)
+- **API**: `POST /api/portfolio-snapshot` (upsert) / `GET /api/portfolio-snapshot` (최근 30일 조회)
+
 ### app_config
 
 동적 엔진 제어용 설정 테이블. `key-value` 구조로 런타임 중 엔진 동작을 제어한다. `GET/POST /api/engine-control`로 읽기/쓰기하며, `runEngine()` 시작 시 `SELECT key, value FROM app_config`로 일괄 조회한다.
@@ -276,6 +331,10 @@ ON CONFLICT (key) DO NOTHING;
 | `getTodayRealizedLoss()` | 오늘 청산된 `pnl_percent` 합산 (일일 손실 한도 계산용) |
 | `logEngineRun(tradeCount, actions, scannedCount, durationMs, error?)` | `engine_runs` INSERT |
 | `extractCandlePattern(signal)` | 헬퍼: `SignalResult`에서 캔들패턴 지표 추출 |
+| `savePendingOrder(params)` | `pending_orders` INSERT |
+| `getPendingOrders()` | `pending_orders` SELECT 전체, `created_at` 오름차순 |
+| `deletePendingOrder(orderId)` | `pending_orders` DELETE by id |
+| `updatePositionPhase(code, phase)` | `positions` UPDATE — open 포지션의 phase 변경 |
 
 `app_config` 테이블은 `/api/engine-control` 라우트에서 upsert 방식으로 관리한다. GET 요청 시 전체 키를 SELECT, POST 요청 시 변경 키를 `ON CONFLICT (key) DO UPDATE`로 upsert한다. 엔진 진입 시점에는 일괄 SELECT 후 객체로 변환하여 사용한다.
 
@@ -286,6 +345,8 @@ ON CONFLICT (key) DO NOTHING;
 | 2026-04-11 | `trade_memory` + `learning_snapshots` 테이블 신규 생성 |
 | 2026-04-17 | `pending_signals`, `watchlist`, `kis_config`, `engine_runs`, `market_snapshots` 운영 중 확인 |
 | 2026-04-17 | `app_config` 테이블 신규 생성 (Supabase SQL Editor에서 직접 실행) |
+| 2026-04-20 | `pending_orders` 테이블 신규 생성 (미체결 주문 추적) |
+| 2026-04-20 | `portfolio_snapshots` 테이블 신규 생성 (일별 포트폴리오 스냅샷) |
 
 ## Key Decisions
 

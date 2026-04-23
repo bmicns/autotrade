@@ -35,6 +35,7 @@ export function HomeTab() {
 
   const holdings = useAppStore((s) => s.holdings);
   const prices = useAppStore((s) => s.prices);
+  const candles = useAppStore((s) => s.candles);
   const kisConnected = useAppStore((s) => s.kisConnected);
   const kisLoading = useAppStore((s) => s.kisLoading);
   const kisConfig = useAppStore((s) => s.kisConfig);
@@ -70,8 +71,17 @@ export function HomeTab() {
 
   function getPrice(code: string) {
     const real = prices.get(code);
-    if (real) return { price: real.price, change: real.changeRate };
-    return { price: 0, change: 0 };
+    if (real) return { price: real.price, change: real.changeRate as number | null };
+    const h = holdings.find((h) => h.code === code);
+    if (h?.currentPrice) return { price: h.currentPrice, change: null as number | null };
+    return { price: 0, change: null as number | null };
+  }
+
+  function getCandles(code: string, fallbackPrice: number): number[] {
+    const real = candles.get(code);
+    if (real && real.length >= 2) return real;
+    // 실데이터 없으면 가짜 데이터 fallback
+    return [fallbackPrice * 0.98, fallbackPrice * 0.99, fallbackPrice];
   }
 
   const totalKRW = storeTotalEval > 0
@@ -196,7 +206,7 @@ export function HomeTab() {
         </div>
       ) : holdings.map((h) => {
         const { price, change } = getPrice(h.code);
-        const up = change >= 0;
+        const up = change !== null ? change >= 0 : (h.pnlRate ?? 0) >= 0;
         return (
           <div key={h.code}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px" }}>
@@ -217,14 +227,14 @@ export function HomeTab() {
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                {price > 0 && <Sparkline data={[price * 0.98, price * 0.99, price]} color={up ? COLORS.rise : COLORS.fall} />}
+                {price > 0 && <Sparkline data={getCandles(h.code, price)} color={up ? COLORS.rise : COLORS.fall} baseline={h.avgPrice} />}
                 <div style={{ textAlign: "right" }}>
                   <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.ink, fontVariantNumeric: "tabular-nums" }}>
                     {price > 0 ? price.toLocaleString("ko-KR") : "—"}
                   </span>
                   <div style={{ marginTop: 3 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: up ? COLORS.rise : COLORS.fall, fontVariantNumeric: "tabular-nums" }}>
-                      {price > 0 ? `${up ? "+" : ""}${change.toFixed(2)}%` : "—"}
+                      {price > 0 && change !== null ? `${change >= 0 ? "+" : ""}${change.toFixed(2)}%` : "—"}
                     </span>
                   </div>
                 </div>

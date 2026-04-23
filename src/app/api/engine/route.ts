@@ -6,7 +6,7 @@ import { logEngineRun } from "@/lib/engine/db";
 import { supabase } from "@/lib/supabase/api-client";
 import { runStep0, runStep1, runStep15 } from "@/lib/engine/steps";
 import { END_OF_DAY_TIME } from "@/lib/engine/constants";
-import { runStep2, runStep3 } from "@/lib/engine/steps-scan";
+import { runStep2, runStep3, runStep4 } from "@/lib/engine/steps-scan";
 import { getBalance } from "@/lib/engine/kis";
 import { sendDailyReport } from "@/lib/engine/notify";
 
@@ -264,7 +264,11 @@ async function runEngine(config: EngineConfig) {
     tradeCount = step3.tradeCount;
     scannedCount += step3.scannedCount;
 
-    const allActions = [...step0.actions, ...step1.actions, ...step15.actions, ...step2.actions, ...step3.actions];
+    const step4 = await runStep4(ctx, step1.holdings, step0.marketTrend, tradeCount);
+    tradeCount = step4.tradeCount;
+    scannedCount += step4.scannedCount;
+
+    const allActions = [...step0.actions, ...step1.actions, ...step15.actions, ...step2.actions, ...step3.actions, ...step4.actions];
     const durationMs = Date.now() - startTime;
     await logEngineRun(tradeCount, allActions, scannedCount, durationMs);
 

@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
       .select("*")
       .order("created_at", { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     const now = new Date().toISOString();
     const isExpired = active
