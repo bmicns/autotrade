@@ -104,8 +104,9 @@ export async function fetchBalance(config: KISConfig): Promise<BalanceResult | n
       pnlRate: Number(item.evlu_pfls_rt) || 0,
     })).filter((h: BalanceItem) => h.quantity > 0);
 
-    const cash = Number(output2.nxdy_excc_amt) || Number(output2.dnca_tot_amt) || 0;
-    const totalAsset = Number(output2.tot_evlu_amt) || 0;
+    const cash = Number(output2.dnca_tot_amt) || Number(output2.nxdy_excc_amt) || 0;
+    // tot_evlu_amt = 주식+예수금 합계. 장 마감 후 0일 수 있으므로 nass_amt → cash 순으로 fallback
+    const totalAsset = Number(output2.tot_evlu_amt) || Number(output2.nass_amt) || cash;
     const pnlTotal = Number(output2.evlu_pfls_smtl_amt) || 0;
     const assetChangeRate = Number(output2.asst_icdc_erng_rt) || 0;
 

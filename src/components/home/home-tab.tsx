@@ -6,6 +6,7 @@ import { useAppStore } from "@/lib/store";
 import { Badge } from "@/components/ui/badge";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Icon } from "@/components/ui/icons";
+import { EngineHealthCard } from "./engine-health-card";
 
 interface NewsItem {
   title: string;
@@ -114,7 +115,11 @@ export function HomeTab() {
         )}
         <div style={{ display: "flex", alignItems: "baseline", gap: 6, justifyContent: "flex-end" }}>
           <span style={{ fontSize: 52, fontWeight: 100, color: "#fff", letterSpacing: "-2px", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
-            {totalKRW > 0 ? Math.round(totalKRW).toLocaleString("ko-KR") : "0"}
+            {kisLoading && totalKRW === 0
+              ? "—"
+              : totalKRW > 0
+                ? Math.round(totalKRW).toLocaleString("ko-KR")
+                : "0"}
           </span>
           <span style={{ fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.5)" }}>원</span>
         </div>
@@ -188,6 +193,8 @@ export function HomeTab() {
           </span>
         </div>
       )}
+
+      <EngineHealthCard />
 
       <div style={{ height: 1, background: COLORS.line, marginTop: 10 }} />
 

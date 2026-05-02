@@ -44,6 +44,11 @@ export interface KISConfig {
   accountNo: string;
   token?: string;
   tokenExpiry?: string;
+  source?: "env" | "db" | null;
+  runtimeMode?: string;
+  apiBaseUrl?: string;
+  hasEnvConfig?: boolean;
+  hasDbConfig?: boolean;
 }
 
 export interface TradeSettings {
@@ -59,6 +64,13 @@ export interface TradeSettings {
   afternoonEnd: string;         // 오후 세션 종료
   dailyLossLimit: number;       // 일일 손실 한도 (%)
   maxHoldDays: number;          // 최대 보유 기간 (일)
+}
+
+interface AccountSummary {
+  totalEval: number;
+  totalPnl: number;
+  totalPnlRate: number;
+  cashBalance: number;
 }
 
 interface AppState {
@@ -124,6 +136,33 @@ function saveToStorage(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch { /* ignore */ }
+}
+
+async function hasOpenPositions(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/positions");
+    if (!res.ok) return false;
+    const data = await res.json();
+    return Array.isArray(data) && data.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function getFallbackSummary(holdings: Holding[], summary: AccountSummary): AccountSummary {
+  if (summary.totalEval > 0) return summary;
+
+  const stockEval = holdings.reduce(
+    (sum, holding) => sum + (holding.currentPrice || holding.avgPrice || 0) * holding.quantity,
+    0,
+  );
+
+  return {
+    totalEval: stockEval + summary.cashBalance,
+    totalPnl: summary.totalPnl,
+    totalPnlRate: summary.totalPnlRate,
+    cashBalance: summary.cashBalance,
+  };
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -256,6 +295,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       if (balance) {
+        const cachedHoldings = loadFromStorage<Holding[]>("nx-holdings", []);
+        const cachedSummary = loadFromStorage<AccountSummary>("nx-account-summary", {
+          totalEval: 0,
+          totalPnl: 0,
+          totalPnlRate: 0,
+          cashBalance: 0,
+        });
+
         // KIS 연결 성공 → 더미 제거, KIS 잔고만 표시
         const holdings: Holding[] = balance.holdings.map((h) => ({
           code: h.code,
@@ -266,15 +313,41 @@ export const useAppStore = create<AppState>((set, get) => ({
           currentPrice: h.currentPrice,
           pnlRate: h.pnlRate,
         }));
-        saveToStorage("nx-holdings", holdings);
-        set({
-          holdings,
+
+        const summary: AccountSummary = {
           totalEval: balance.totalEval || balance.cashBalance,
           totalPnl: balance.totalPnl,
           totalPnlRate: balance.totalPnlRate,
           cashBalance: balance.cashBalance,
-          kisConnected: true,
-        });
+        };
+
+        const emptyBalanceLooksSuspicious =
+          holdings.length === 0 &&
+          cachedHoldings.length > 0 &&
+          await hasOpenPositions();
+
+        if (emptyBalanceLooksSuspicious) {
+          const fallbackSummary = getFallbackSummary(cachedHoldings, cachedSummary);
+          set({
+            holdings: cachedHoldings,
+            totalEval: fallbackSummary.totalEval,
+            totalPnl: fallbackSummary.totalPnl,
+            totalPnlRate: fallbackSummary.totalPnlRate,
+            cashBalance: fallbackSummary.cashBalance,
+            kisConnected: true,
+          });
+          return;
+        }
+
+        // KIS가 0만 반환할 경우(장 마감 후 등) 이전 캐시가 있으면 금액 유지
+        const summaryToSave: AccountSummary =
+          summary.totalEval === 0 && summary.cashBalance === 0 && cachedSummary.totalEval > 0
+            ? { ...cachedSummary }
+            : summary;
+
+        saveToStorage("nx-holdings", holdings);
+        saveToStorage("nx-account-summary", summaryToSave);
+        set({ holdings, ...summaryToSave, kisConnected: true });
 
         // 보유 종목이 있으면 시세도 조회
         if (holdings.length > 0) {
@@ -312,6 +385,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   hydrate: async () => {
     const holdings = loadFromStorage("nx-holdings", []);
     const trades = loadFromStorage<Trade[]>("nx-trades", []);
+    const summary = loadFromStorage<AccountSummary>("nx-account-summary", {
+      totalEval: 0,
+      totalPnl: 0,
+      totalPnlRate: 0,
+      cashBalance: 0,
+    });
 
     // KIS 설정: Supabase 우선, 없으면 localStorage 폴백
     let kisConfig = loadFromStorage<KISConfig>("nx-kis", { appKey: "", appSecret: "", accountNo: "" });
@@ -327,7 +406,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch { /* localStorage 폴백 */ }
 
     const tradeSettings = loadFromStorage<TradeSettings>("nx-trade-settings", get().tradeSettings);
-    set({ holdings, trades, kisConfig, tradeSettings });
+    set({ holdings, trades, kisConfig, tradeSettings, ...summary });
 
     // appKey가 있으면 자동으로 KIS 데이터 로드 (토큰은 fetchKISData가 자동 관리)
     if (kisConfig.appKey && kisConfig.appSecret && kisConfig.accountNo) {
