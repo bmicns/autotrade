@@ -1,17 +1,72 @@
-import { supabase } from "@/lib/supabase/api-client";
-import { NextRequest, NextResponse } from "next/server";
-import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
+import { NextResponse } from "next/server";
+import { KIS_API_BASE, KIS_TR } from "@/lib/constants";
+import { getKstNowParts, getMarketClosureReason } from "@/lib/engine/market-calendar";
 import { runLearning } from "@/lib/learning";
+import { getKisCredentialCandidates, persistKisConfig } from "@/lib/kis/runtime-config";
 
+async function issueKisToken(appKey: string, appSecret: string): Promise<{ ok: true; token: string } | { ok: false; detail: string }> {
+  const tokenRes = await fetch(`${KIS_API_BASE}/oauth2/tokenP`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ grant_type: "client_credentials", appkey: appKey, appsecret: appSecret }),
+  });
 
-export async function GET(_req: NextRequest) {
-  const appKey = process.env.KIS_APP_KEY;
-  const appSecret = process.env.KIS_APP_SECRET;
-  if (!appKey || !appSecret) {
-    return NextResponse.json({ error: "KIS 환경변수 미설정" }, { status: 400 });
+  if (!tokenRes.ok) {
+    const errBody = await tokenRes.text().catch(() => "");
+    return { ok: false, detail: `${tokenRes.status} ${errBody.slice(0, 200)}`.trim() };
   }
 
-  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+  const tokenData = await tokenRes.json();
+  return { ok: true, token: tokenData.access_token as string };
+}
+
+async function resolveObserverKisCredentials(): Promise<
+  | { ok: true; appKey: string; appSecret: string; token: string }
+  | { ok: false; detail: string }
+> {
+  const candidates = await getKisCredentialCandidates();
+  if (candidates.length === 0) {
+    return { ok: false, detail: "KIS 자격증명 미설정 (kis_config / env)" };
+  }
+
+  const failures: string[] = [];
+  for (const candidate of candidates) {
+    const tokenResult = await issueKisToken(candidate.config.appKey, candidate.config.appSecret);
+    if (tokenResult.ok) {
+      if (candidate.source === "env") {
+        await persistKisConfig(candidate.config);
+      }
+      return {
+        ok: true,
+        appKey: candidate.config.appKey,
+        appSecret: candidate.config.appSecret,
+        token: tokenResult.token,
+      };
+    }
+    failures.push(`${candidate.source}:${tokenResult.detail}`);
+  }
+
+  return { ok: false, detail: `KIS 토큰 발급 실패: ${failures.join(" | ")}` };
+}
+
+export async function GET() {
+  const supabaseError = getSupabaseConfigError();
+  if (supabaseError) {
+    return NextResponse.json({ error: supabaseError }, { status: 503 });
+  }
+
+  const { data: appConfigs } = await supabase.from("app_config").select("key, value");
+  const cfgMap = new Map((appConfigs || []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
+  const closureReason = getMarketClosureReason(cfgMap);
+  if (closureReason) {
+    return NextResponse.json({
+      skipped: true,
+      reason: closureReason,
+    });
+  }
+
+  const today = getKstNowParts().date;
   const nowUtc = new Date();
   const isLearningDay = nowUtc.getUTCDay() === 1; // UTC 월요일
 
@@ -44,19 +99,15 @@ export async function GET(_req: NextRequest) {
   }
 
   // ── 시장 스냅샷 수집: KIS 토큰 필요 ──
-  const tokenRes = await fetch(`${KIS_VTS_BASE}/oauth2/tokenP`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ grant_type: "client_credentials", appkey: appKey, appsecret: appSecret }),
-  });
-  if (!tokenRes.ok) {
+  const resolved = await resolveObserverKisCredentials();
+  if (!resolved.ok) {
     return NextResponse.json({
       captured: 0,
-      tokenError: "KIS 토큰 발급 실패 (스냅샷 수집 스킵)",
+      tokenError: resolved.detail,
       ...(learningResult ? { learning: learningResult } : {}),
     });
   }
-  const { access_token: token } = await tokenRes.json();
+  const { appKey, appSecret, token } = resolved;
 
   const kis = {
     "Content-Type": "application/json; charset=utf-8",
@@ -71,7 +122,7 @@ export async function GET(_req: NextRequest) {
   for (const { code, name } of watchlist) {
     try {
       const params = new URLSearchParams({ fid_cond_mrkt_div_code: "J", fid_input_iscd: code });
-      const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`, { headers: kis });
+      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`, { headers: kis });
       if (!res.ok) continue;
       const { output } = await res.json();
       if (!output) continue;

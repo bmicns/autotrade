@@ -1,45 +1,116 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { loadLatestLearning, applyLearning } from "@/lib/learning";
-import { KIS_VTS_BASE } from "@/lib/constants";
+import { KIS_API_BASE } from "@/lib/constants";
 import { type EngineConfig, type StepContext } from "@/lib/engine/types";
 import { logEngineRun } from "@/lib/engine/db";
 import { supabase } from "@/lib/supabase/api-client";
 import { runStep0, runStep1, runStep15 } from "@/lib/engine/steps";
 import { END_OF_DAY_TIME } from "@/lib/engine/constants";
+import { getEngineSkipReason, getKstNowParts } from "@/lib/engine/market-calendar";
 import { runStep2, runStep3, runStep4 } from "@/lib/engine/steps-scan";
+import { normalizeStrategyAllocations } from "@/lib/engine/strategies";
 import { getBalance } from "@/lib/engine/kis";
-import { sendDailyReport } from "@/lib/engine/notify";
+import { sendDailyReport, sendEngineErrorAlert } from "@/lib/engine/notify";
+import { getKisCredentialCandidates, persistKisConfig, type RuntimeKisConfig } from "@/lib/kis/runtime-config";
+
+async function issueKisToken(appKey: string, appSecret: string, maxRetry = 2): Promise<{ ok: true; token: string } | { ok: false; detail: string }> {
+  let lastDetail = "";
+  for (let attempt = 1; attempt <= maxRetry; attempt++) {
+    try {
+      const tokenRes = await fetch(`${KIS_API_BASE}/oauth2/tokenP`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grant_type: "client_credentials", appkey: appKey, appsecret: appSecret }),
+      });
+
+      if (tokenRes.ok) {
+        const tokenData = await tokenRes.json();
+        return { ok: true, token: tokenData.access_token as string };
+      }
+
+      const errBody = await tokenRes.text().catch(() => "");
+      lastDetail = `${tokenRes.status} ${errBody.slice(0, 200)}`.trim();
+    } catch (e) {
+      lastDetail = e instanceof Error ? e.message : "네트워크 오류";
+    }
+
+    if (attempt < maxRetry) {
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+  return { ok: false, detail: lastDetail };
+}
+
+async function resolveKisCredentials(): Promise<
+  | { ok: true; creds: RuntimeKisConfig; token: string; source: "env" | "db" }
+  | { ok: false; detail: string }
+> {
+  const candidates = (await getKisCredentialCandidates()).map(({ source, config }) => ({ source, creds: config }));
+  if (candidates.length === 0) {
+    return { ok: false, detail: "KIS 자격증명 미설정 (kis_config / env)" };
+  }
+
+  const failures: string[] = [];
+  for (const candidate of candidates) {
+    const tokenResult = await issueKisToken(candidate.creds.appKey, candidate.creds.appSecret);
+    if (tokenResult.ok) {
+      if (candidate.source === "env") {
+        await persistKisConfig(candidate.creds);
+      }
+      return { ok: true, creds: candidate.creds, token: tokenResult.token, source: candidate.source };
+    }
+    failures.push(`${candidate.source}:${tokenResult.detail}`);
+  }
+
+  return { ok: false, detail: failures.join(" | ") };
+}
+
+async function cleanupStaleSignals() {
+  const now = new Date();
+  const pendingCutoff = new Date(now.getTime() - 2 * 3600 * 1000).toISOString();
+  const approvedCutoff = new Date(now.getTime() - 24 * 3600 * 1000).toISOString();
+
+  await Promise.all([
+    supabase
+      .from("pending_signals")
+      .update({ status: "expired", resolved_at: now.toISOString(), signal_data: { resolution_detail: "승인 대기 2시간 초과" } })
+      .eq("status", "pending")
+      .lt("created_at", pendingCutoff),
+    supabase
+      .from("pending_signals")
+      .update({ status: "expired", resolved_at: now.toISOString(), signal_data: { resolution_detail: "승인 후 24시간 초과" } })
+      .in("status", ["approved", "processing"])
+      .lt("created_at", approvedCutoff),
+  ]);
+}
 
 // ─── Cron GET ───────────────────────────────────
-// 인증은 proxy.ts CRON_ROUTES에서 처리됨
-export async function GET(_req: NextRequest) {
-  const appKey = process.env.KIS_APP_KEY;
-  const appSecret = process.env.KIS_APP_SECRET;
-  const accountNo = process.env.KIS_ACCOUNT_NO;
-  if (!appKey || !appSecret || !accountNo) {
-    return NextResponse.json({ error: "KIS 환경변수 미설정" }, { status: 400 });
+// 인증은 middleware.ts CRON_ROUTES에서 처리됨
+export async function GET() {
+  await cleanupStaleSignals();
+
+  const { data: appConfigs } = await supabase.from("app_config").select("key, value");
+  const cfgMap = new Map((appConfigs || []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
+  const skipReason = getEngineSkipReason(cfgMap);
+  if (skipReason) {
+    await logEngineRun(0, [{ type: "skipped", code: "", detail: skipReason }], 0, 0);
+    return NextResponse.json({ skipped: true, reason: skipReason });
   }
 
-  const cleanAppKey = appKey.replace(/\\n|\n/g, "").trim();
-  const cleanAppSecret = appSecret.replace(/\\n|\n/g, "").trim();
-  const cleanAccountNo = accountNo.replace(/\\n|\n/g, "").trim();
-
-  const tokenRes = await fetch(`${KIS_VTS_BASE}/oauth2/tokenP`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ grant_type: "client_credentials", appkey: cleanAppKey, appsecret: cleanAppSecret }),
-  });
-  if (!tokenRes.ok) {
-    const errBody = await tokenRes.text().catch(() => "");
-    await logEngineRun(0, [{ type: "token_error", code: "", detail: `KIS 토큰 발급 실패: ${tokenRes.status} ${errBody.slice(0, 200)}` }], 0, 0, "토큰 발급 실패");
+  const resolved = await resolveKisCredentials();
+  if (!resolved.ok) {
+    await logEngineRun(0, [{ type: "token_error", code: "", detail: `KIS 토큰 발급 실패: ${resolved.detail}` }], 0, 0, "토큰 발급 실패");
     return NextResponse.json({ error: "토큰 발급 실패" }, { status: 500 });
   }
-  const tokenData = await tokenRes.json();
 
   const { data: watchlistData } = await supabase.from("watchlist").select("code").eq("active", true);
   const watchlist = (watchlistData || []).map((w: { code: string }) => w.code);
 
   const config: EngineConfig = {
-    appKey: cleanAppKey, appSecret: cleanAppSecret, accountNo: cleanAccountNo, token: tokenData.access_token,
+    appKey: resolved.creds.appKey,
+    appSecret: resolved.creds.appSecret,
+    accountNo: resolved.creds.accountNo,
+    token: resolved.token,
     ...DEFAULT_ENGINE_CONFIG,
     watchlist,
   };
@@ -66,7 +137,11 @@ const DEFAULT_ENGINE_CONFIG = {
 function applyAppConfig(
   config: EngineConfig,
   cfgMap: Map<string, unknown>
-): { maxPositions: number; maxPerSector: number } {
+): {
+  maxPositions: number;
+  maxPerSector: number;
+  strategyAllocations: ReturnType<typeof normalizeStrategyAllocations>;
+} {
   if (cfgMap.has("stop_loss"))            config.stopLoss            = -Math.abs(Number(cfgMap.get("stop_loss")));
   if (cfgMap.has("take_profit"))          config.takeProfit          =   Number(cfgMap.get("take_profit"));
   if (cfgMap.has("take_profit_ratio"))    config.takeProfitRatio     =   Number(cfgMap.get("take_profit_ratio"));
@@ -98,9 +173,16 @@ function applyAppConfig(
     };
   }
 
+  const strategyAllocations = normalizeStrategyAllocations({
+    watchlist_pullback: cfgMap.get("strategy_alloc_watchlist_pullback"),
+    surge_momentum: cfgMap.get("strategy_alloc_surge_momentum"),
+    institutional_follow: cfgMap.get("strategy_alloc_institutional_follow"),
+  });
+
   return {
     maxPositions: Number(cfgMap.get("max_positions") ?? 5) || 5,
     maxPerSector: Number(cfgMap.get("max_per_sector") ?? 2),
+    strategyAllocations,
   };
 }
 
@@ -180,31 +262,13 @@ async function runEngine(config: EngineConfig) {
     const { data: appConfigs } = await supabase.from("app_config").select("key, value");
     const cfgMap = new Map((appConfigs || []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
 
-    const engineEnabled = cfgMap.get("engine_enabled");
-    if (engineEnabled === false || engineEnabled === "false") {
-      await logEngineRun(0, [{ type: "skipped", code: "", detail: "비상 정지 활성" }], 0, 0);
-      return NextResponse.json({ skipped: true, reason: "비상 정지 활성" });
+    const skipReason = getEngineSkipReason(cfgMap);
+    if (skipReason) {
+      await logEngineRun(0, [{ type: "skipped", code: "", detail: skipReason }], 0, 0);
+      return NextResponse.json({ skipped: true, reason: skipReason });
     }
 
-    const parseHHMM = (s: unknown, fallback: string): number => {
-      const str = s ? String(s) : fallback;
-      const [h, m] = str.split(":").map(Number);
-      return (h || 0) * 100 + (m || 0);
-    };
-    const kstNow  = Date.now() + 9 * 3600000;
-    const kstHour = new Date(kstNow).getUTCHours();
-    const kstMin  = new Date(kstNow).getUTCMinutes();
-    const kstTime = kstHour * 100 + kstMin;
-    // GitHub Actions 크론은 1.5~2h 지연 발생 — 단일 구간(09:30~15:20)으로 처리
-    const mStart = parseHHMM(cfgMap.get("morning_start"), "09:30");
-    const mEnd   = parseHHMM(cfgMap.get("morning_end"),   "15:20");
-    const inSession = kstTime >= mStart && kstTime <= mEnd;
-    if (!inSession) {
-      await logEngineRun(0, [{ type: "skipped", code: "", detail: `장 외 시간 (KST ${kstHour}:${String(kstMin).padStart(2, "0")})` }], 0, 0);
-      return NextResponse.json({ skipped: true, reason: `장 외 시간 (KST ${kstHour}:${String(kstMin).padStart(2, "0")})` });
-    }
-
-    const { maxPositions, maxPerSector } = applyAppConfig(config, cfgMap);
+    const { maxPositions, maxPerSector, strategyAllocations } = applyAppConfig(config, cfgMap);
 
     let learning = null;
     try { learning = await loadLatestLearning(); } catch { /* 학습 로딩 실패 시 기본값 사용 */ }
@@ -222,6 +286,7 @@ async function runEngine(config: EngineConfig) {
       weakScore:   config.weakScore   ?? 40,
       rsiBuy:      config.rsiBuy      ?? 30,
       rsiSell:     config.rsiSell     ?? 70,
+      strategyAllocations,
       customWeights: applied.weights,
     };
 
@@ -272,7 +337,7 @@ async function runEngine(config: EngineConfig) {
     const durationMs = Date.now() - startTime;
     await logEngineRun(tradeCount, allActions, scannedCount, durationMs);
 
-    if (kstTime >= END_OF_DAY_TIME) {
+    if (getKstNowParts().hhmm >= END_OF_DAY_TIME) {
       await runEndOfDay(config, allActions, cfgMap, today);
     }
 
@@ -289,12 +354,14 @@ async function runEngine(config: EngineConfig) {
           targetRiskAmount: applied.targetRiskAmount,
           atrMultipliers: applied.atrMultipliers,
         },
+        strategyAllocations,
       } : null,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "엔진 실행 실패";
     const durationMs = Date.now() - startTime;
     await logEngineRun(0, [], scannedCount, durationMs, msg);
+    await sendEngineErrorAlert(msg, durationMs).catch(() => {});
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

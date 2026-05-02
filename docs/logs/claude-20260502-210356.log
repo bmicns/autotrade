@@ -1,0 +1,27 @@
+설계서 작성 완료했습니다.
+
+---
+
+## `docs/02-design/features/nexio.design.md` 주요 내용 요약
+
+### 1. 아키텍처 결정 사항
+- **서버/클라이언트 경계 명확화:** `notify.ts`는 서버 전용 — API route에서만 호출, 클라이언트 store에서 직접 호출 금지
+- 신규 파일 7개 (훅 5 + API route 1 + 컴포넌트 1), 수정 파일 7개
+
+### 2. 신규 API 스펙
+- **`GET /api/kis/health`** — 60초 폴링용 경량 헬스체크. 상태 변화 감지 시만 Telegram 알림
+
+### 3. P0 핵심 설계
+- 기존 silent catch 위치 전수 조사 후 **서버 API route 레벨의 KIS 통신 실패**에만 Telegram 알림 추가
+- 클라이언트 store의 catch는 UI 경험 보호 목적으로 **그대로 유지** (알림 불필요)
+- `appKey`/`appSecret`은 알림 메시지에 포함 금지 (`kisCode` + `kisMessage`만 전송)
+
+### 4. 구현 순서
+`Phase 1 → 2 → 3 → 4` (P0 백엔드 → P0 폴링 → P1 훅 추출 → P2 UI 개선)
+
+### 5. 절대규칙 준수
+모든 수정 대상 파일 예상 줄 수 기준 500줄 이하 확인 완료.
+
+---
+
+**wiki 컴파일도 완료되었습니다.**

@@ -1,8 +1,11 @@
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
   try {
+    const supabaseError = getSupabaseConfigError();
+    if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, Number(searchParams.get("page") ?? "1"));
     const limit = Math.min(50, Math.max(1, Number(searchParams.get("limit") ?? "20")));
@@ -47,6 +50,20 @@ export async function GET(req: NextRequest) {
       ? ((latestRun.actions as Action[]) ?? []).find((a) => a.type === "market_context") ?? null
       : null;
 
+    // 엔진 헬스체크
+    const kstNow = new Date(Date.now() + 9 * 3600_000);
+    const kstHHMM = kstNow.getHours() * 100 + kstNow.getMinutes();
+    const isMarketHours = kstNow.getDay() >= 1 && kstNow.getDay() <= 5 && kstHHMM >= 930 && kstHHMM <= 1520;
+    const lastRunAt = latestRun?.run_at ?? null;
+    const minutesSinceLastRun = lastRunAt
+      ? Math.floor((Date.now() - new Date(lastRunAt).getTime()) / 60_000)
+      : null;
+    const healthStatus =
+      !lastRunAt ? "unknown"
+      : latestRun?.error ? "error"
+      : isMarketHours && minutesSinceLastRun !== null && minutesSinceLastRun > 120 ? "stale"
+      : "healthy";
+
     return NextResponse.json({
       runs: runsResult.data ?? [],
       total: runsResult.count ?? 0,
@@ -55,6 +72,7 @@ export async function GET(req: NextRequest) {
       hasMore: (runsResult.count ?? 0) > offset + limit,
       filterLogs,
       marketContext,
+      healthStatus: { status: healthStatus, lastRunAt, minutesSinceLastRun },
     });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

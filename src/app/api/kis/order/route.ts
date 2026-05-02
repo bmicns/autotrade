@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { placeOrder } from "@/lib/kis/api";
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 
 const VALID_SIDES = new Set(["buy", "sell"]);
 const MAX_QTY = 10_000;
@@ -8,6 +8,9 @@ const MAX_PRICE = 10_000_000;
 
 export async function POST(req: NextRequest) {
   try {
+    const supabaseError = getSupabaseConfigError();
+    if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
     const { side, stockCode, quantity, price, orderType } = await req.json();
 
     if (!VALID_SIDES.has(side)) {

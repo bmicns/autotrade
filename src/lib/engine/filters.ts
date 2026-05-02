@@ -1,5 +1,5 @@
 // ─── 종목 필터 함수 ──────────────────────────────
-import { KIS_VTS_BASE } from "@/lib/constants";
+import { KIS_API_BASE } from "@/lib/constants";
 import { type EngineConfig, type FilterResult } from "./types";
 import { headers } from "./kis";
 
@@ -48,7 +48,7 @@ export async function getListingDate(config: EngineConfig, code: string): Promis
   try {
     const params = new URLSearchParams({ PDNO: code, PRDT_TYPE_CD: "300" });
     const res = await fetch(
-      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/search-stock-info?${params}`,
+      `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/search-stock-info?${params}`,
       { headers: headers(config, "CTPF1002R") },
     );
     if (!res.ok) return "";
@@ -77,13 +77,7 @@ export function applySectorFilter(
 export function applyStockFilter(priceData: Record<string, string>, listingDate: string): FilterResult {
   const reasons: string[] = [];
 
-  // 1. 시가총액 500억 이상 (hts_avls 단위: 억원, 없으면 통과)
-  const marketCap = Number(priceData.hts_avls || 0);
-  if (marketCap > 0 && marketCap < 500) {
-    reasons.push(`시가총액 ${marketCap}억 (500억 미만)`);
-  }
-
-  // 2. 시장경고 정상만 허용 (00=정상, 01=주의, 02=경고, 03=위험)
+  // 1. 시장경고 정상만 허용 (00=정상, 01=주의, 02=경고, 03=위험)
   const warnCode = priceData.mrkt_warn_cls_code || "00";
   if (warnCode !== "00") {
     const warnLabel: Record<string, string> = { "01": "투자주의", "02": "투자경고", "03": "투자위험" };

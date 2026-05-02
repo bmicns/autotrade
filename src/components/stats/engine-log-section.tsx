@@ -28,21 +28,43 @@ interface LogResponse {
 }
 
 const ACTION_META: Record<string, { label: string; emoji: string; color: string }> = {
-  approved_buy:    { label: "매수", emoji: "🟢", color: "#E22929" },
-  split_buy_1:     { label: "분할매수1", emoji: "🟢", color: "#E22929" },
-  split_buy_2:     { label: "분할매수2", emoji: "🟢", color: "#E22929" },
-  surge_buy:       { label: "급등매수", emoji: "⚡", color: "#E22929" },
-  stop_loss:       { label: "손절", emoji: "📉", color: "#1554F0" },
-  take_profit:     { label: "익절", emoji: "💰", color: "#E22929" },
-  trailing_stop:   { label: "트레일링", emoji: "📉", color: "#1554F0" },
-  max_hold_sell:   { label: "기간청산", emoji: "⏰", color: "#1554F0" },
-  sell:            { label: "매도", emoji: "🔵", color: "#1554F0" },
-  buy_failed:      { label: "매수실패", emoji: "❌", color: "#9CA3AF" },
-  sell_failed:     { label: "매도실패", emoji: "❌", color: "#9CA3AF" },
+  // 매수 계열
+  approved_buy:        { label: "매수", emoji: "🟢", color: "#E22929" },
+  split_buy_1:         { label: "분할매수1", emoji: "🟢", color: "#E22929" },
+  split_buy_2:         { label: "분할매수2", emoji: "🟢", color: "#E22929" },
+  surge_buy:           { label: "급등매수", emoji: "⚡", color: "#E22929" },
+  orgn_follow_buy:     { label: "기관추종매수", emoji: "🏦", color: "#E22929" },
+  order_filled:        { label: "주문체결", emoji: "✅", color: "#E22929" },
+  // 매도 계열
+  stop_loss:           { label: "손절", emoji: "📉", color: "#1554F0" },
+  take_profit:         { label: "익절", emoji: "💰", color: "#E22929" },
+  trailing_stop:       { label: "트레일링", emoji: "📉", color: "#1554F0" },
+  trailing_only:       { label: "트레일링조정", emoji: "📐", color: "#1554F0" },
+  max_hold_sell:       { label: "기간청산", emoji: "⏰", color: "#1554F0" },
+  orgn_flip_sell:      { label: "기관이탈청산", emoji: "🏦", color: "#1554F0" },
+  sell:                { label: "매도", emoji: "🔵", color: "#1554F0" },
+  // 실패
+  buy_failed:          { label: "매수실패", emoji: "❌", color: "#9CA3AF" },
+  sell_failed:         { label: "매도실패", emoji: "❌", color: "#9CA3AF" },
   approved_buy_failed: { label: "매수실패", emoji: "❌", color: "#9CA3AF" },
   surge_buy_failed:    { label: "급등매수실패", emoji: "❌", color: "#9CA3AF" },
-  skipped:         { label: "건너뜀", emoji: "⏭️", color: "#9CA3AF" },
-  token_error:     { label: "토큰오류", emoji: "🔑", color: "#1554F0" },
+  // 경고/정지
+  daily_loss_halt:     { label: "일손실정지", emoji: "🛑", color: "#F59E0B" },
+  market_crash_halt:   { label: "급락정지", emoji: "🛑", color: "#F59E0B" },
+  order_cancelled_timeout: { label: "주문취소", emoji: "⏱️", color: "#F59E0B" },
+  token_error:         { label: "토큰오류", emoji: "🔑", color: "#F59E0B" },
+  // 정보
+  cancel_open_orders:  { label: "미체결취소", emoji: "🗑️", color: "#9CA3AF" },
+  dynamic_risk_skipped:{ label: "리스크스킵", emoji: "⏭️", color: "#9CA3AF" },
+  filtered_out:        { label: "필터탈락", emoji: "🚫", color: "#9CA3AF" },
+  pending_approval:    { label: "승인대기", emoji: "⏳", color: "#9CA3AF" },
+  surge_pending:       { label: "급등승인대기", emoji: "⏳", color: "#9CA3AF" },
+  signal_skip:         { label: "신호스킵", emoji: "↩️", color: "#9CA3AF" },
+  surge_signal_skip:   { label: "급등스킵", emoji: "↩️", color: "#9CA3AF" },
+  signals_expired:     { label: "신호만료", emoji: "🗓️", color: "#9CA3AF" },
+  skip:                { label: "건너뜀", emoji: "⏭️", color: "#9CA3AF" },
+  skipped:             { label: "건너뜀", emoji: "⏭️", color: "#9CA3AF" },
+  market_context:      { label: "시장상황", emoji: "📊", color: "#9CA3AF" },
 };
 
 function getActionMeta(type: string) {

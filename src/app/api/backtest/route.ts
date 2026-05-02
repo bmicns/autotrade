@@ -1,6 +1,6 @@
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
-import { KIS_VTS_BASE } from "@/lib/constants";
+import { KIS_API_BASE } from "@/lib/constants";
 import { runBacktest } from "@/lib/backtest";
 import type { DailyCandle } from "@/lib/kis/indicators";
 
@@ -13,6 +13,9 @@ export const maxDuration = 30;
  */
 export async function POST(req: NextRequest) {
   try {
+    const supabaseError = getSupabaseConfigError();
+    if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
     const body = await req.json();
     const {
       stockCode,
@@ -56,7 +59,38 @@ export async function POST(req: NextRequest) {
       maxPerTrade,
     });
 
-    return NextResponse.json(result);
+    // 실전 성과 비교 — 백테스트와 동일 기간의 positions 데이터
+    const periodStart = candles[0]?.date ?? "";
+    const periodEnd = candles[candles.length - 1]?.date ?? "";
+    let liveComparison = null;
+    if (periodStart && periodEnd) {
+      const { data: livePositions } = await supabase
+        .from("positions")
+        .select("pnl_amount, pnl_percent, entry_date, exit_date, exit_reason, status")
+        .eq("stock_code", stockCode)
+        .gte("entry_date", periodStart)
+        .lte("entry_date", periodEnd);
+
+      if (livePositions && livePositions.length > 0) {
+        const closed = livePositions.filter((p) => p.status === "closed");
+        const wins = closed.filter((p) => (p.pnl_amount ?? 0) > 0);
+        const totalPnl = closed.reduce((s, p) => s + (Number(p.pnl_amount) || 0), 0);
+        const avgWinPnl = wins.length > 0 ? wins.reduce((s, p) => s + (Number(p.pnl_amount) || 0), 0) / wins.length : 0;
+        const losses = closed.filter((p) => (p.pnl_amount ?? 0) <= 0);
+        const avgLossPnl = losses.length > 0 ? Math.abs(losses.reduce((s, p) => s + (Number(p.pnl_amount) || 0), 0) / losses.length) : 0;
+        liveComparison = {
+          period: `${periodStart} ~ ${periodEnd}`,
+          totalTrades: livePositions.length,
+          closedTrades: closed.length,
+          winRate: closed.length > 0 ? Math.round((wins.length / closed.length) * 1000) / 10 : 0,
+          profitFactor: avgLossPnl > 0 ? Math.round((avgWinPnl / avgLossPnl) * 100) / 100 : null,
+          totalPnl: Math.round(totalPnl),
+          totalReturn: maxPerTrade > 0 ? Math.round((totalPnl / maxPerTrade) * 10000) / 100 : 0,
+        };
+      }
+    }
+
+    return NextResponse.json({ ...result, liveComparison });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "백테스트 실행 실패";
     return NextResponse.json({ error: msg }, { status: 500 });
@@ -80,7 +114,7 @@ async function fetchDailyCandles(
   });
 
   const res = await fetch(
-    `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?${params}`,
+    `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?${params}`,
     {
       headers: {
         "Content-Type": "application/json; charset=utf-8",

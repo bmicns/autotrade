@@ -17,25 +17,29 @@ export const COLORS = {
   hero: "#0F0F2E",
 } as const;
 
-// KIS 모의투자 API
-export const KIS_VTS_BASE = "https://openapivts.koreainvestment.com:29443";
-export const KIS_VTS_WS = "ws://ops.koreainvestment.com:31000";
+export const KIS_RUNTIME_MODE = process.env.KIS_RUNTIME_MODE ?? "paper";
+export const KIS_API_BASE = process.env.KIS_API_BASE_URL ?? "https://openapivts.koreainvestment.com:29443";
+export const KIS_WS_URL = process.env.KIS_WS_URL ?? "ws://ops.koreainvestment.com:31000";
+
+function trEnv(key: string, fallback: string): string {
+  return process.env[key] ?? fallback;
+}
 
 export const KIS_TR = {
-  PRICE: "FHKST01010100",
-  DAILY_PRICE: "FHKST01010400",
-  ASKING_PRICE: "FHKST01010200",
-  BUY: "VTTC0802U",
-  SELL: "VTTC0801U",
-  CANCEL: "VTTC0803U",
-  BALANCE: "VTTC8434R",
-  ORDER_HISTORY: "VTTC8001R",
-  BUYABLE: "VTTC8908R",
-  WS_PRICE: "H0STCNT0",
-  WS_ASKING: "H0STASP0",
-  WS_EXECUTION: "H0STCNI9",
-  INVESTOR_TREND: "FHKST01010900",  // 투자자별 매매동향
-  OPEN_ORDERS: "VTTC8036R",         // 미체결 조회
-  MINUTE_CHART: "FHKST03010200",    // 분봉 (VWAP/Volume Profile용)
-  INST_RANKING: "FHPST02320000",    // 기관/외국인 순매수 상위 종목
+  PRICE: trEnv("KIS_TR_PRICE", "FHKST01010100"),
+  DAILY_PRICE: trEnv("KIS_TR_DAILY_PRICE", "FHKST01010400"),
+  ASKING_PRICE: trEnv("KIS_TR_ASKING_PRICE", "FHKST01010200"),
+  BUY: trEnv("KIS_TR_BUY", "VTTC0802U"),
+  SELL: trEnv("KIS_TR_SELL", "VTTC0801U"),
+  CANCEL: trEnv("KIS_TR_CANCEL", "VTTC0803U"),
+  BALANCE: trEnv("KIS_TR_BALANCE", "VTTC8434R"),
+  ORDER_HISTORY: trEnv("KIS_TR_ORDER_HISTORY", "VTTC8001R"),
+  BUYABLE: trEnv("KIS_TR_BUYABLE", "VTTC8908R"),
+  WS_PRICE: trEnv("KIS_TR_WS_PRICE", "H0STCNT0"),
+  WS_ASKING: trEnv("KIS_TR_WS_ASKING", "H0STASP0"),
+  WS_EXECUTION: trEnv("KIS_TR_WS_EXECUTION", "H0STCNI9"),
+  INVESTOR_TREND: trEnv("KIS_TR_INVESTOR_TREND", "FHKST01010900"),  // 투자자별 매매동향
+  OPEN_ORDERS: trEnv("KIS_TR_OPEN_ORDERS", "VTTC8036R"),         // 미체결 조회
+  MINUTE_CHART: trEnv("KIS_TR_MINUTE_CHART", "FHKST03010200"),    // 분봉 (VWAP/Volume Profile용)
+  INST_RANKING: trEnv("KIS_TR_INST_RANKING", "FHPST02320000"),    // 기관/외국인 순매수 상위 종목
 } as const;

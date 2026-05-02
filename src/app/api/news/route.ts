@@ -78,7 +78,15 @@ function parseGoogleRSS(xml: string, limit = 5): NewsItem[] {
 
   // 최신순 정렬 후 limit 적용
   allItems.sort((a, b) => b._ts - a._ts);
-  return allItems.slice(0, limit).map(({ _ts, ...item }) => item);
+  return allItems.slice(0, limit).map((item) => ({
+    title: item.title,
+    source: item.source,
+    time: item.time,
+    url: item.url,
+    sentiment: item.sentiment,
+    score: item.score,
+    summary: item.summary,
+  }));
 }
 
 // 네이버 금융 뉴스 (Google News RSS 경유)

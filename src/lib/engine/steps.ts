@@ -1,54 +1,22 @@
 import { supabase } from "@/lib/supabase/api-client";
 import {
   calcATR, calcDynamicRisk,
-  checkRisk, type AtrMultipliers, type SignalResult, type SignalRaw,
+  checkRisk, type AtrMultipliers, type SignalRaw,
 } from "@/lib/kis/indicators";
 import { getPrice, getDailyCandles, getBalance, sellOrder, limitBuyOrder, cancelOpenBuyOrders, checkOrderFill } from "@/lib/engine/kis";
 import { type DailyCandle } from "@/lib/kis/indicators";
 import { applySectorFilter, applyStockFilter, getListingDate } from "@/lib/engine/filters";
 import { getMarketTrend, getInvestorTrend } from "@/lib/engine/market";
-import { openPosition, closePosition, closeTradeMemory, getOpenPosition, getTodayRealizedLoss, getSectorCounts, updatePositionPhase, recordPartialExit, getPendingOrders, deletePendingOrder, savePendingOrder } from "@/lib/engine/db";
+import { openPosition, closePosition, closeTradeMemory, getOpenPosition, getTodayRealizedLoss, getSectorCounts, recordPartialExit, getPendingOrders, deletePendingOrder, savePendingOrder, recordTradeMemory } from "@/lib/engine/db";
+import { getStrategyBudget, type StrategyKey } from "@/lib/engine/strategies";
 import { type EngineAction, type StepContext, type MarketTrend } from "@/lib/engine/types";
 import { sendTradeAlert } from "@/lib/engine/notify";
-import { OPENING_BONUS_STRONG, OPENING_BONUS_MILD, OPENING_PENALTY_MILD, OPENING_PENALTY_STRONG, APPROVED_BUY_RATIO, SECOND_TP_RATIO, DEFAULT_MARKET_CRASH_THRESHOLD, OPENING_GAP_STRONG, OPENING_GAP_MILD, OPENING_GAP_DROP_STRONG, OPENING_GAP_DROP_MILD } from "@/lib/engine/constants";
+import { APPROVED_BUY_RATIO, SECOND_TP_RATIO, DEFAULT_MARKET_CRASH_THRESHOLD } from "@/lib/engine/constants";
+import { batchFetch, getOpeningBonus } from "@/lib/engine/utils";
+export { batchFetch, getOpeningBonus };
 
 // 외부 신호(pending_signals)에서 openPosition 호출 시 사용하는 빈 SignalRaw placeholder
 const EMPTY_RAW: SignalRaw = { rsi: 0, macd: 0, macdSignal: 0, macdCrossover: "none", ma5: 0, ma20: 0, ema5: 0, ema20: 0, bbPosition: "middle", volumeRatio: 100, atr: 0, adx: 0, regime: "ranging", stochRsiK: 50, stochRsiD: 50, obvSlope: 0, disparity: 0, patternSellHit: false };
-
-// ─── 배치 병렬 패치 ─────────────────────────────────
-export async function batchFetch<T>(
-  codes: string[],
-  fetcher: (code: string) => Promise<T>,
-  batchSize = 3
-): Promise<Map<string, T>> {
-  const map = new Map<string, T>();
-  for (let i = 0; i < codes.length; i += batchSize) {
-    const chunk = codes.slice(i, i + batchSize);
-    const results = await Promise.allSettled(
-      chunk.map(async (code) => ({ code, data: await fetcher(code) }))
-    );
-    for (const r of results) {
-      if (r.status === "fulfilled") map.set(r.value.code, r.value.data);
-    }
-    if (i + batchSize < codes.length) await new Promise((r) => setTimeout(r, 200));
-  }
-  return map;
-}
-
-// ─── 장 초반 스냅샷 보너스 ───────────────────────────
-export function getOpeningBonus(
-  code: string,
-  snapshotMap: Map<string, { open_price: number; snapshot_price: number; snapshot_volume: number }>
-): number {
-  const snap = snapshotMap.get(code);
-  if (!snap || snap.open_price <= 0) return 0;
-  const gap = (snap.snapshot_price - snap.open_price) / snap.open_price;
-  if (gap > OPENING_GAP_STRONG && snap.snapshot_volume > 50000) return OPENING_BONUS_STRONG;
-  if (gap > OPENING_GAP_MILD) return OPENING_BONUS_MILD;
-  if (gap < OPENING_GAP_DROP_STRONG) return OPENING_PENALTY_STRONG;
-  if (gap < OPENING_GAP_DROP_MILD) return OPENING_PENALTY_MILD;
-  return 0;
-}
 
 // ═══ STEP 0: 미체결 취소 + 시장 모멘텀 + 일일 손실 체크 ═══
 export async function runStep0(ctx: StepContext): Promise<{
@@ -104,7 +72,7 @@ export async function runStep0(ctx: StepContext): Promise<{
           order.stock_name ?? null,
           fillResult.filledPrice,
           fillResult.filledQty,
-          { strength: "weak", side: "buy", totalScore: order.signal_score ?? 0, comment: "체결 복구", indicators: [], raw: EMPTY_RAW, matchCount: 0 },
+          { strength: "weak" as const, side: "buy" as const, totalScore: order.signal_score ?? 0, comment: "체결 복구", indicators: [], raw: EMPTY_RAW, matchCount: 0, ...(order.strategy_key ? { strategyKey: order.strategy_key as StrategyKey } : {}) },
           "initial",
         );
       }
@@ -263,11 +231,12 @@ async function executePartialTakeProfit(params: {
 }
 
 // ═══ STEP 1: 보유종목 손절/익절/기간초과 감시 ═══
-export async function runStep1(ctx: StepContext, marketTrend: MarketTrend): Promise<{
+export async function runStep1(ctx: StepContext, _marketTrend: MarketTrend): Promise<{
   actions: EngineAction[];
   tradeCount: number;
   holdings: Record<string, string>[];
 }> {
+  void _marketTrend;
   const actions: EngineAction[] = [];
   let tradeCount = 0;
 
@@ -389,13 +358,33 @@ export async function runStep15(
 ): Promise<{ actions: EngineAction[]; tradeCount: number }> {
   const actions: EngineAction[] = [];
 
+  async function resolveSignal(id: string, status: "expired" | "failed" | "rejected", detail?: string) {
+    await supabase
+      .from("pending_signals")
+      .update({
+        status,
+        resolved_at: new Date().toISOString(),
+        signal_data: detail ? { resolution_detail: detail } : undefined,
+      })
+      .eq("id", id);
+  }
+
   type PendingSignalRow = {
     id: string;
     stock_code: string;
     stock_name?: string | null;
     signal_score: number;
     signal_comment?: string | null;
-    signal_data?: { qty_override?: number | string } | null;
+    signal_data?: {
+      qty_override?: number | string;
+      strategyKey?: StrategyKey;
+      allocationPct?: number | string;
+      raw?: SignalRaw;
+      indicators?: unknown[];
+      matchCount?: number;
+      openingBonus?: number;
+      institutionalBonus?: number;
+    } | null;
     source?: string | null;
   };
 
@@ -415,20 +404,24 @@ export async function runStep15(
     if (tradeCount >= ctx.maxDailyTrades) break;
     if (openCount() >= ctx.maxPositions) break;
     if (holdings.some((h) => h.pdno === sig.stock_code && Number(h.hldg_qty) > 0)) {
-      await supabase.from("pending_signals").update({ status: "expired", resolved_at: new Date().toISOString() }).eq("id", sig.id);
+      await resolveSignal(sig.id, "expired", "이미 보유 중이라 자동 만료");
       continue;
     }
 
     const priceData = await getPrice(ctx.config, sig.stock_code);
     const price = Number(priceData?.stck_prpr) || 0;
     const name = priceData?.hts_kor_isnm || sig.stock_name || sig.stock_code;
-    if (price <= 0) continue;
+    if (price <= 0) {
+      await resolveSignal(sig.id, "failed", "현재가 조회 실패");
+      actions.push({ type: "approved_buy_failed", code: sig.stock_code, name, detail: "현재가 조회 실패" });
+      continue;
+    }
 
     const sector15 = (priceData as Record<string, string>).bstp_kor_isnm || null;
     const sectorFilter15 = applySectorFilter(sector15, sectorCounts15, ctx.maxPerSector);
     if (!sectorFilter15.passed) {
       actions.push({ type: "skip", code: sig.stock_code, name, detail: sectorFilter15.reason });
-      await supabase.from("pending_signals").update({ status: "expired", resolved_at: new Date().toISOString() }).eq("id", sig.id);
+      await resolveSignal(sig.id, "rejected", sectorFilter15.reason);
       continue;
     }
 
@@ -437,13 +430,25 @@ export async function runStep15(
     const stockFilter15 = applyStockFilter(priceData as Record<string, string>, listingDate15);
     if (!stockFilter15.passed) {
       actions.push({ type: "skip", code: sig.stock_code, name, detail: `종목 필터: ${stockFilter15.reason}` });
-      await supabase.from("pending_signals").update({ status: "expired", resolved_at: new Date().toISOString() }).eq("id", sig.id);
+      await resolveSignal(sig.id, "rejected", `종목 필터: ${stockFilter15.reason}`);
       continue;
     }
 
     const qtyOverride = sig.signal_data?.qty_override ? Math.min(Number(sig.signal_data.qty_override), 10_000) : 0;
-    const qty = qtyOverride > 0 ? qtyOverride : Math.floor((ctx.maxPerTrade * APPROVED_BUY_RATIO) / price);
-    if (qty <= 0) continue;
+    const strategyKey = sig.signal_data?.strategyKey;
+    const allocationPct = Number(sig.signal_data?.allocationPct);
+    const allocatedBudget = strategyKey
+      ? getStrategyBudget(
+          ctx.maxPerTrade,
+          Number.isFinite(allocationPct) ? allocationPct : ctx.strategyAllocations[strategyKey]
+        )
+      : ctx.maxPerTrade;
+    const qty = qtyOverride > 0 ? qtyOverride : Math.floor((allocatedBudget * APPROVED_BUY_RATIO) / price);
+    if (qty <= 0) {
+      await resolveSignal(sig.id, "failed", "주문 수량이 0주로 계산됨");
+      actions.push({ type: "approved_buy_failed", code: sig.stock_code, name, detail: "주문 수량이 0주로 계산됨" });
+      continue;
+    }
 
     const result = await limitBuyOrder(ctx.config, sig.stock_code, qty, price);
     actions.push({
@@ -463,20 +468,43 @@ export async function runStep15(
         limit_price: result.limitPrice,
         signal_score: sig.signal_score ?? null,
       });
-      const existingPos15 = await getOpenPosition(sig.stock_code);
-      if (!existingPos15) {
-        await openPosition(sig.stock_code, name, result.limitPrice, qty, { strength: "weak", side: "buy", totalScore: sig.signal_score, comment: sig.signal_comment ?? "", indicators: [], raw: EMPTY_RAW, matchCount: 0 } as SignalResult, "initial", sector15 ?? undefined);
-      }
       await sendTradeAlert({ type: "buy", code: sig.stock_code, name, qty, price: result.limitPrice, score: sig.signal_score });
+      if (sig.signal_data?.raw) {
+        const storedRaw = sig.signal_data.raw;
+        const syntheticSignal = {
+          indicators: (sig.signal_data.indicators ?? []) as import("@/lib/kis/indicators").IndicatorResult[],
+          totalScore: sig.signal_score,
+          matchCount: sig.signal_data.matchCount ?? 0,
+          strength: "strong" as const,
+          side: "buy" as const,
+          comment: "",
+          raw: storedRaw,
+        };
+        await recordTradeMemory({
+          code: sig.stock_code,
+          name,
+          baseSignal: syntheticSignal,
+          learnedSignal: syntheticSignal,
+          bonuses: {
+            market: 0,
+            investor: sig.signal_data.institutionalBonus ?? 0,
+            snapshot: sig.signal_data.openingBonus ?? 0,
+          },
+          adjustedScore: sig.signal_score,
+          weightsSource: "default",
+          positionSize: qty * result.limitPrice,
+        });
+      }
       // 섹터 카운트 즉시 갱신 — 루프 내 중복 매수 방지
       if (sector15) sectorCounts15.set(sector15, (sectorCounts15.get(sector15) ?? 0) + 1);
       tradeCount++;
+      await resolveSignal(sig.id, "expired", "주문 접수 완료");
+    } else {
+      await resolveSignal(sig.id, "failed", result.msg);
     }
 
-    await supabase.from("pending_signals").update({ status: "expired", resolved_at: new Date().toISOString() }).eq("id", sig.id);
     await new Promise((r) => setTimeout(r, 200));
   }
 
   return { actions, tradeCount };
 }
-

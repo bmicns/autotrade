@@ -16,6 +16,7 @@ export interface Position {
   pnl_percent: number | null;
   hold_days: number | null;
   status: string;
+  strategy_key?: string | null;
 }
 
 export interface PerformanceStats {
@@ -35,6 +36,7 @@ export interface PerformanceStats {
   indicatorAccuracy: IndicatorAccuracy[];
   monthlyBreakdown: MonthlyPnl[];
   exitReasonBreakdown: ExitReasonCount[];
+  strategyBreakdown: StrategyPerformance[];
 }
 
 export interface IndicatorAccuracy {
@@ -55,6 +57,14 @@ export interface ExitReasonCount {
   reason: string;
   count: number;
   avgPnl: number;
+}
+
+export interface StrategyPerformance {
+  strategyKey: string;
+  trades: number;
+  winRate: number;
+  totalPnl: number;
+  avgReturn: number;
 }
 
 // ─── 승률 ────────────────────────────────────────
@@ -164,6 +174,32 @@ function calcExitReasonBreakdown(closed: Position[]): ExitReasonCount[] {
   }));
 }
 
+function calcStrategyBreakdown(closed: Position[]): StrategyPerformance[] {
+  const map = new Map<string, { trades: number; wins: number; totalPnl: number; totalReturn: number }>();
+
+  for (const position of closed) {
+    const strategyKey =
+      position.strategy_key ||
+      ((position.entry_signal as { strategyKey?: string } | null)?.strategyKey ?? "unclassified");
+    const entry = map.get(strategyKey) || { trades: 0, wins: 0, totalPnl: 0, totalReturn: 0 };
+    entry.trades++;
+    entry.totalPnl += position.pnl_amount ?? 0;
+    entry.totalReturn += position.pnl_percent ?? 0;
+    if ((position.pnl_amount ?? 0) > 0) entry.wins++;
+    map.set(strategyKey, entry);
+  }
+
+  return Array.from(map.entries())
+    .map(([strategyKey, value]) => ({
+      strategyKey,
+      trades: value.trades,
+      winRate: value.trades > 0 ? (value.wins / value.trades) * 100 : 0,
+      totalPnl: value.totalPnl,
+      avgReturn: value.trades > 0 ? value.totalReturn / value.trades : 0,
+    }))
+    .sort((a, b) => b.totalPnl - a.totalPnl);
+}
+
 // ─── 종합 성과 분석 ─────────────────────────────
 export function analyzePerformance(positions: Position[]): PerformanceStats {
   const closed = positions.filter((p) => p.status === "closed");
@@ -175,6 +211,7 @@ export function analyzePerformance(positions: Position[]): PerformanceStats {
   const indicatorAccuracy = calcIndicatorAccuracy(closed);
   const monthlyBreakdown = calcMonthlyBreakdown(closed);
   const exitReasonBreakdown = calcExitReasonBreakdown(closed);
+  const strategyBreakdown = calcStrategyBreakdown(closed);
 
   const totalPnl = closed.reduce((s, p) => s + (p.pnl_amount ?? 0), 0);
   const avgReturn = closed.length > 0
@@ -200,6 +237,6 @@ export function analyzePerformance(positions: Position[]): PerformanceStats {
     avgReturn, totalPnl, profitFactor,
     maxDrawdown, avgHoldDays,
     bestTrade, worstTrade,
-    indicatorAccuracy, monthlyBreakdown, exitReasonBreakdown,
+    indicatorAccuracy, monthlyBreakdown, exitReasonBreakdown, strategyBreakdown,
   };
 }

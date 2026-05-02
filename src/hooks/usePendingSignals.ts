@@ -24,13 +24,18 @@ export interface FilterLog {
 
 export function usePendingSignals() {
   const [signals, setSignals] = useState<PendingSignal[]>([]);
+  const [recentSignals, setRecentSignals] = useState<PendingSignal[]>([]);
   const [filterLogs, setFilterLogs] = useState<FilterLog[]>([]);
   const [dartCodes, setDartCodes] = useState<Set<string>>(new Set());
 
   const fetchSignals = useCallback(async () => {
     try {
-      const res = await fetch("/api/pending-signals");
-      if (res.ok) setSignals(await res.json());
+      const [activeRes, historyRes] = await Promise.all([
+        fetch("/api/pending-signals"),
+        fetch("/api/pending-signals?scope=history"),
+      ]);
+      if (activeRes.ok) setSignals(await activeRes.json());
+      if (historyRes.ok) setRecentSignals(await historyRes.json());
     } catch { /* ignore */ }
   }, []);
 
@@ -81,5 +86,5 @@ export function usePendingSignals() {
     } catch { return false; }
   }, []);
 
-  return { signals, filterLogs, dartCodes, fetchSignals, fetchEngineLog, approveSignal, rejectSignal, expireSignal };
+  return { signals, recentSignals, filterLogs, dartCodes, fetchSignals, fetchEngineLog, approveSignal, rejectSignal, expireSignal };
 }

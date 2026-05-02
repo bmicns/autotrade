@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 
 /*
 CREATE TABLE IF NOT EXISTS portfolio_snapshots (
@@ -25,6 +25,9 @@ export interface PortfolioSnapshot {
 
 // POST /api/portfolio-snapshot — 오늘 날짜 스냅샷 upsert
 export async function POST(req: NextRequest) {
+  const supabaseError = getSupabaseConfigError();
+  if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
   let body: unknown;
   try {
     body = await req.json();
@@ -82,6 +85,9 @@ export async function POST(req: NextRequest) {
 
 // GET /api/portfolio-snapshot — 최근 30일 스냅샷 조회
 export async function GET() {
+  const supabaseError = getSupabaseConfigError();
+  if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
   const { data, error } = await supabase
     .from("portfolio_snapshots")
     .select("id, date, total_eval, total_pnl, cash_balance, open_positions, created_at")

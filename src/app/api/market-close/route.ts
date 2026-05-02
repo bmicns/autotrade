@@ -1,13 +1,21 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase/api-client";
+import { getMarketClosureReason } from "@/lib/engine/market-calendar";
 import { cancelOpenBuyOrders } from "@/lib/engine/kis";
 import { getBalance, getToken } from "@/lib/kis/api";
 import { sendMarketCloseAlert } from "@/lib/engine/notify";
 import type { EngineConfig } from "@/lib/engine/types";
 type MinConfig = Pick<EngineConfig, "appKey" | "appSecret" | "accountNo" | "token">;
 
-export async function GET(_req: NextRequest) {
+export async function GET() {
   try {
+    const { data: appConfigs } = await supabase.from("app_config").select("key, value");
+    const cfgMap = new Map((appConfigs || []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
+    const closureReason = getMarketClosureReason(cfgMap);
+    if (closureReason) {
+      return NextResponse.json({ skipped: true, reason: closureReason });
+    }
+
     // KIS 설정 로드
     const { data: kisConfig } = await supabase.from("kis_config").select("*").limit(1).maybeSingle();
     if (!kisConfig?.app_key || !kisConfig?.app_secret || !kisConfig?.account_no) {

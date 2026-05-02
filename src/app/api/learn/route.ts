@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 import { runLearning } from "@/lib/learning";
 
@@ -6,6 +6,9 @@ import { runLearning } from "@/lib/learning";
 // GET /api/learn?history=N&recentTrades=N — 학습 결과 조회
 export async function GET(req: NextRequest) {
   try {
+    const supabaseError = getSupabaseConfigError();
+    if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
     const { searchParams } = new URL(req.url);
     const historyN = parseInt(searchParams.get("history") ?? "0", 10);
     const recentTradesN = parseInt(searchParams.get("recentTrades") ?? "0", 10);
@@ -50,9 +53,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    const { count: tradeMemoryCount } = await supabase
+      .from("trade_memory")
+      .select("id", { count: "exact", head: true });
+
     return NextResponse.json({
       snapshot: active ?? null,
       isExpired,
+      tradeMemoryCount: tradeMemoryCount ?? 0,
       ...(history !== undefined ? { history } : {}),
       ...(abStats !== undefined ? { abStats } : {}),
     });
@@ -62,12 +70,20 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/learn — 학습 즉시 실행 (수동 트리거)
+// Authorization: Bearer CRON_SECRET → 크론/서버 호출
+// Authorization 헤더 없음 → 미들웨어가 세션 쿠키를 이미 검증한 UI 호출
 export async function POST(req: NextRequest) {
+  const supabaseError = getSupabaseConfigError();
+  if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
   const authHeader = req.headers.get("authorization");
-  if (!process.env.CRON_SECRET) return NextResponse.json({ error: "CRON_SECRET 미설정" }, { status: 500 });
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (authHeader) {
+    if (!process.env.CRON_SECRET) return NextResponse.json({ error: "CRON_SECRET 미설정" }, { status: 500 });
+    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
   }
+  // Authorization 헤더 없으면 미들웨어 세션 검증 통과로 간주
 
   try {
     const result = await runLearning();

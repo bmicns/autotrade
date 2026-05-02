@@ -1,10 +1,12 @@
 "use server";
 
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 
 function checkAdminSecret() {
   const secret = process.env.ADMIN_SECRET;
   if (!secret) throw new Error("ADMIN_SECRET 미설정");
+  const supabaseError = getSupabaseConfigError();
+  if (supabaseError) throw new Error(supabaseError);
 }
 
 export async function setEngineEnabled(enabled: boolean) {
@@ -137,6 +139,62 @@ export async function setSignalThresholds(thresholds: {
       .upsert({ key, value, updated_at: new Date().toISOString() });
     if (error) throw new Error(error.message);
   }
+
+  return { ok: true };
+}
+
+export async function setStrategyAllocations(allocations: {
+  watchlistPullback?: number;
+  surgeMomentum?: number;
+  institutionalFollow?: number;
+}) {
+  checkAdminSecret();
+
+  const mapping: Array<[string, number | undefined]> = [
+    ["strategy_alloc_watchlist_pullback", allocations.watchlistPullback],
+    ["strategy_alloc_surge_momentum", allocations.surgeMomentum],
+    ["strategy_alloc_institutional_follow", allocations.institutionalFollow],
+  ];
+
+  for (const [, value] of mapping) {
+    if (value === undefined) continue;
+    const val = Number(value);
+    if (!Number.isFinite(val) || val < 0 || val > 100) {
+      throw new Error("전략 배분 비율은 0~100 사이 숫자여야 합니다");
+    }
+  }
+
+  for (const [key, value] of mapping) {
+    if (value === undefined) continue;
+    const { error } = await supabase
+      .from("app_config")
+      .upsert({ key, value: Number(value), updated_at: new Date().toISOString() });
+    if (error) throw new Error(error.message);
+  }
+
+  return { ok: true };
+}
+
+export async function setMarketHolidays(holidays: string[] | string) {
+  checkAdminSecret();
+
+  const values = Array.isArray(holidays)
+    ? holidays.map((value) => String(value).trim()).filter(Boolean)
+    : String(holidays)
+        .split(/[\n,]/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+  for (const value of values) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new Error("market_holidays는 YYYY-MM-DD 형식이어야 합니다");
+    }
+  }
+
+  const { error } = await supabase
+    .from("app_config")
+    .upsert({ key: "market_holidays", value: values, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
 
   return { ok: true };
 }

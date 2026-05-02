@@ -1,0 +1,44 @@
+모두 500줄 이내입니다. 위키 컴파일도 완료되었는지 확인합니다.
+
+---
+
+```
+─────────────────────────────────────────────────
+📋 플랫폼 개발 원칙 점검
+─────────────────────────────────────────────────
+1. 페이지 500줄 제한   : ✅ 준수
+   signal-tab.tsx 38줄 / watchlist-section.tsx 134줄
+   strategy-tab.tsx 251줄 / 훅 파일 전체 26~33줄
+2. 단일 책임           : ✅ 준수
+   signal-tab → 신호 승인/거절 전용
+   watchlist-section → 관심종목 UI 전담
+   useStockSearch → 검색 로직 전담
+   useThresholdsOptimize → 최적화 로직 전담
+3. 서버 검증·보안      : ✅ 준수
+   app/api/ 파일 일절 수정 안 함 (금지 영역)
+   클라이언트 훅은 fetch만 — 검증은 서버 측 기존 로직에 위임
+4. 성능 (중복·N+1)     : ✅ 준수
+   useStockSearch: debounce 300ms 유지
+   useThresholdsOptimize: 사용자 명시 액션 기반 (자동 폴링 없음)
+   watchlist-section: 마운트 1회 fetch
+5. 폴더 구조           : ✅ 준수
+   훅 → src/hooks/ / 컴포넌트 → src/components/signal/
+─────────────────────────────────────────────────
+위반 항목: 없음
+─────────────────────────────────────────────────
+```
+
+**변경 요약:**
+
+| 파일 | 작업 |
+|------|------|
+| `src/hooks/useStockSearch.ts` | 신규 — debounce 300ms 검색 훅 |
+| `src/hooks/useThresholdsOptimize.ts` | 신규 — 임계치 최적화 훅 |
+| `src/hooks/usePositions.ts` | 신규 — open 포지션 조회 훅 |
+| `src/hooks/usePortfolioSnapshot.ts` | 신규 — 포트폴리오 스냅샷 훅 |
+| `src/hooks/useNews.ts` | 신규 — 뉴스 피드 훅 |
+| `src/components/signal/watchlist-section.tsx` | 신규 — 관심종목 독립 섹션 (DART 배지 포함) |
+| `src/components/signal/signal-tab.tsx` | 수정 — 관심종목 탭/검색 상태 전부 제거, 신호 UI만 집중 (166→38줄) |
+| `src/components/strategy/strategy-tab.tsx` | 수정 — `handleOptimize` → `useThresholdsOptimize` 교체, `<WatchlistSection />` 하단 추가 (263→251줄) |
+
+> `app/api/`, `lib/`, `actions/` 는 일체 수정하지 않았습니다.

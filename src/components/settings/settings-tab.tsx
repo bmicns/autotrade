@@ -45,7 +45,12 @@ export function SettingsTab() {
         setKISConfig({ appKey, appSecret, accountNo, token: data.token, tokenExpiry: new Date(Date.now() + 86400000).toISOString() });
         setTestResult("연결 성공! 토큰 발급 완료");
       } else {
-        setTestResult(`실패: ${data.error || "알 수 없는 오류"}`);
+        const parts = [
+          data.status ? `HTTP ${data.status}` : "",
+          data.error || "알 수 없는 오류",
+          data.detail || "",
+        ].filter(Boolean);
+        setTestResult(`실패: ${parts.join(" / ")}`);
       }
     } catch {
       setTestResult("네트워크 오류 — KIS 서버 연결 실패");
@@ -56,6 +61,11 @@ export function SettingsTab() {
 
   const hasKey   = !!kisConfig.appKey;
   const hasToken = !!kisConfig.token;
+  const activeSourceLabel =
+    kisConfig.source === "env" ? "환경변수(env)" :
+    kisConfig.source === "db" ? "DB(kis_config)" :
+    "미확인";
+  const runtimeModeLabel = kisConfig.runtimeMode === "paper" ? "모의투자" : kisConfig.runtimeMode || "미확인";
 
   return (
     <div>
@@ -110,8 +120,40 @@ export function SettingsTab() {
 
         <div style={{ borderRadius: 12, padding: 12, background: `${COLORS.fall}08`, border: `1px solid ${COLORS.fall}15` }}>
           <span style={{ fontSize: 11, lineHeight: 1.6, color: COLORS.mid }}>
-            KIS Developers (apiportal.koreainvestment.com)에서 모의투자용 앱키를 발급받으세요. 키는 브라우저 로컬에만 저장됩니다.
+            KIS Developers (apiportal.koreainvestment.com)에서 모의투자용 앱키를 발급받으세요. 현재 런타임 기준값은 {activeSourceLabel}이며,
+            {kisConfig.source === "env"
+              ? " 현재 DB 값이 없거나 불완전해 env 폴백으로 운영 중입니다. 저장하면 서버 kis_config와 브라우저 캐시가 함께 갱신됩니다."
+              : " 저장 시 서버 kis_config와 브라우저 캐시가 함께 갱신되며, 실제 운영 조회도 DB 값을 우선 사용합니다."}
           </span>
+        </div>
+
+        <div style={{ borderRadius: 12, padding: 12, background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: COLORS.dim }}>활성 소스</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.ink }}>{activeSourceLabel}</span>
+          </div>
+          <div style={{ height: 8 }} />
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: COLORS.dim }}>활성 계좌번호</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.ink }}>{kisConfig.accountNo || "미설정"}</span>
+          </div>
+          <div style={{ height: 8 }} />
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: COLORS.dim }}>런타임 모드</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.ink }}>{runtimeModeLabel}</span>
+          </div>
+          <div style={{ height: 8 }} />
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: COLORS.dim }}>KIS API Base</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.ink }}>{kisConfig.apiBaseUrl || "미설정"}</span>
+          </div>
+          <div style={{ height: 8 }} />
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: COLORS.dim }}>설정 소스 보유</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.ink }}>
+              env {kisConfig.hasEnvConfig ? "있음" : "없음"} / db {kisConfig.hasDbConfig ? "있음" : "없음"}
+            </span>
+          </div>
         </div>
       </div>
 

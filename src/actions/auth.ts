@@ -2,6 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { generateSessionToken } from "@/lib/session";
 
 const SESSION_COOKIE = "nexio_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30일
@@ -34,7 +35,8 @@ export async function loginAction(
   }
 
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, secret, {
+  const token = generateSessionToken(secret);
+  cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

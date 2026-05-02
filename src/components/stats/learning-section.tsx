@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { COLORS } from "@/lib/constants";
 
+const INITIAL_NOW_MS = Date.now();
+
 export interface LearningSnapshot {
   id: string;
   created_at: string;
@@ -29,6 +31,7 @@ interface LearningSectionProps {
   isExpired: boolean;
   history: LearningSnapshot[];
   abStats?: { avgBase: number; avgLearned: number; sampleSize: number };
+  tradeMemoryCount?: number;
 }
 
 const CONF_LABELS: Record<string, { label: string; color: string; bg: string }> = {
@@ -44,13 +47,29 @@ const BASE_WEIGHTS = {
   ranging:  { RSI: 21, MACD: 13, 이동평균: 13, 볼린저: 21, 거래량: 17, 캔들패턴: 15 },
 };
 
-export function LearningSection({ snapshot, isExpired, history, abStats }: LearningSectionProps) {
+export function LearningSection({ snapshot, isExpired, history, abStats, tradeMemoryCount }: LearningSectionProps) {
   const [activeRegime, setActiveRegime] = useState<"trending" | "ranging">("trending");
+  const [triggering, setTriggering] = useState(false);
+  const [triggerMsg, setTriggerMsg] = useState<string | null>(null);
   const conf = snapshot?.confidence ?? "none";
+
+  const triggerLearning = async () => {
+    setTriggering(true);
+    setTriggerMsg(null);
+    try {
+      const res = await fetch("/api/learn", { method: "POST" });
+      const d = await res.json();
+      setTriggerMsg(d.message ?? (d.error || "학습 실패"));
+    } catch {
+      setTriggerMsg("학습 요청 실패");
+    } finally {
+      setTriggering(false);
+    }
+  };
   const confStyle = CONF_LABELS[conf] ?? CONF_LABELS.none;
 
   const daysSince = snapshot
-    ? Math.floor((Date.now() - new Date(snapshot.created_at).getTime()) / 86400000)
+    ? Math.floor((INITIAL_NOW_MS - new Date(snapshot.created_at).getTime()) / 86400000)
     : null;
 
   const lastLearnedText = daysSince !== null
@@ -64,15 +83,26 @@ export function LearningSection({ snapshot, isExpired, history, abStats }: Learn
         <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>
           자가학습 현황
         </span>
-        {snapshot && (
-          <span style={{
-            fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6,
-            background: confStyle.bg, color: confStyle.color,
-          }}>
-            신뢰도 {confStyle.label}
-          </span>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {snapshot && (
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: confStyle.bg, color: confStyle.color }}>
+              신뢰도 {confStyle.label}
+            </span>
+          )}
+          <button
+            onClick={triggerLearning}
+            disabled={triggering}
+            style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 6, border: `1px solid ${COLORS.line}`, background: COLORS.bg, color: COLORS.ink, cursor: triggering ? "not-allowed" : "pointer", opacity: triggering ? 0.5 : 1 }}
+          >
+            {triggering ? "학습 중..." : "지금 학습"}
+          </button>
+        </div>
       </div>
+      {triggerMsg && (
+        <div style={{ margin: "0 16px 8px", padding: "8px 12px", borderRadius: 8, background: triggerMsg.includes("완료") ? "#F0FDF4" : "#FEF3C7", border: `1px solid ${triggerMsg.includes("완료") ? "#BBF7D0" : "#FDE68A"}`, fontSize: 11, color: triggerMsg.includes("완료") ? "#15803D" : "#92400E" }}>
+          {triggerMsg}
+        </div>
+      )}
 
       {/* 만료 경고 */}
       {isExpired && snapshot && (
@@ -80,6 +110,20 @@ export function LearningSection({ snapshot, isExpired, history, abStats }: Learn
           <span style={{ fontSize: 11, color: "#92400E", fontWeight: 600 }}>
             ⚠ 학습 데이터 만료됨 ({lastLearnedText}) — 최신 스냅샷으로 폴백 사용 중
           </span>
+        </div>
+      )}
+
+      {/* ── 경험 데이터 적재 현황 ── */}
+      {tradeMemoryCount !== undefined && (
+        <div style={{ margin: "0 16px 10px", padding: "10px 14px", borderRadius: 10, background: tradeMemoryCount >= 10 ? "#DCFCE7" : "#FEF3C7", border: `1px solid ${tradeMemoryCount >= 10 ? "#BBF7D0" : "#FDE68A"}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: tradeMemoryCount >= 10 ? "#15803D" : "#92400E" }}>
+              {tradeMemoryCount >= 10 ? "✅" : "⏳"} 경험 데이터 {tradeMemoryCount}건 적재됨
+            </span>
+            <span style={{ fontSize: 10, color: tradeMemoryCount >= 10 ? "#15803D" : "#92400E" }}>
+              {tradeMemoryCount < 10 ? `학습 시작까지 ${10 - tradeMemoryCount}건 더 필요` : tradeMemoryCount < 30 ? "신뢰도 low" : tradeMemoryCount < 50 ? "신뢰도 medium" : "신뢰도 high 가능"}
+            </span>
+          </div>
         </div>
       )}
 

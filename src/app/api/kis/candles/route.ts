@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 
 // ⚠️ 서버리스(Vercel) 환경에서 인메모리 rate limit은 인스턴스별로 독립 동작합니다.
 // 여러 인스턴스가 병렬 실행될 경우 실제 허용량이 RATE_LIMIT×N회가 됩니다.
@@ -20,6 +20,9 @@ function checkRateLimit(): boolean {
 
 export async function GET(req: NextRequest) {
   try {
+    const supabaseError = getSupabaseConfigError();
+    if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
     if (!checkRateLimit()) {
       return NextResponse.json({ error: "요청이 너무 많습니다. 잠시 후 다시 시도하세요." }, { status: 429 });
     }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { KIS_VTS_BASE } from "@/lib/constants";
+import { KIS_API_BASE } from "@/lib/constants";
 
 // 일별 시세 조회 (기술지표 계산용 — 최근 60일)
 export async function GET(req: NextRequest) {
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     });
 
     const res = await fetch(
-      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?${params}`,
+      `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?${params}`,
       {
         headers: {
           "Content-Type": "application/json; charset=utf-8",

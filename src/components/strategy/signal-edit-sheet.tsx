@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { COLORS } from "@/lib/constants";
 
 export interface SignalThresholds {
@@ -40,11 +40,7 @@ interface Props {
 
 export function SignalEditSheet({ editKey, thresholds, onSave, onClose }: Props) {
   const meta = SIGNAL_METAS.find((m) => m.key === editKey)!;
-  const [value, setValue] = useState(String(thresholds[editKey]));
-
-  useEffect(() => {
-    setValue(String(thresholds[editKey]));
-  }, [editKey, thresholds]);
+  const [value, setValue] = useState(() => String(thresholds[editKey]));
 
   const handleSave = () => {
     const num = Number(value);

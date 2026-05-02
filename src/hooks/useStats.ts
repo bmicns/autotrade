@@ -23,6 +23,7 @@ export interface LearningData {
   isExpired: boolean;
   history: LearningSnapshot[];
   abStats?: { avgBase: number; avgLearned: number; sampleSize: number };
+  tradeMemoryCount?: number;
 }
 
 export function useStats() {

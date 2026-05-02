@@ -6,6 +6,18 @@ import type { BacktestResult } from "@/lib/backtest";
 
 interface WatchItem { code: string; name: string | null }
 
+interface LiveComparison {
+  period: string;
+  totalTrades: number;
+  closedTrades: number;
+  winRate: number;
+  profitFactor: number | null;
+  totalPnl: number;
+  totalReturn: number;
+}
+
+type BacktestResultWithLive = BacktestResult & { liveComparison?: LiveComparison | null };
+
 export function BacktestSection() {
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [selectedCode, setSelectedCode] = useState("");
@@ -13,7 +25,7 @@ export function BacktestSection() {
   const [takeProfit, setTakeProfit] = useState(5);
   const [trailingStop, setTrailingStop] = useState(-3);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<BacktestResult | null>(null);
+  const [result, setResult] = useState<BacktestResultWithLive | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -143,6 +155,34 @@ export function BacktestSection() {
               ))}
             </div>
           </div>
+
+          {/* 실전 성과 비교 */}
+          {result.liveComparison ? (
+            <div style={{ ...S.card, background: "#F0FDF4", border: "1px solid #BBF7D0" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#15803D", marginBottom: 10 }}>📊 실전 성과 비교 ({result.liveComparison.period})</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                {[
+                  { label: "수익률", bt: `${result.totalReturn >= 0 ? "+" : ""}${result.totalReturn}%`, live: `${result.liveComparison.totalReturn >= 0 ? "+" : ""}${result.liveComparison.totalReturn}%`, btGood: result.totalReturn >= result.liveComparison.totalReturn },
+                  { label: "승률", bt: `${result.winRate}%`, live: `${result.liveComparison.winRate}%`, btGood: result.winRate >= result.liveComparison.winRate },
+                  { label: "거래수", bt: `${result.totalTrades}회`, live: `${result.liveComparison.closedTrades}회`, btGood: true },
+                ].map((row) => (
+                  <div key={row.label} style={{ background: "#fff", borderRadius: 8, padding: "8px 10px", border: "1px solid #BBF7D0" }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#15803D", marginBottom: 6 }}>{row.label}</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                      <span style={{ color: COLORS.dim }}>백테 {row.bt}</span>
+                      <span style={{ fontWeight: 700, color: "#15803D" }}>실전 {row.live}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ ...S.card, background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>
+              <div style={{ fontSize: 12, color: COLORS.dim, textAlign: "center" }}>
+                📊 실전 성과 비교 — 해당 기간 {result.stockName} 실매매 데이터 없음
+              </div>
+            </div>
+          )}
 
           {/* 캔들 패턴 적중률 */}
           {result.patternStats.length > 0 && (

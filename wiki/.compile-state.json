@@ -1,5 +1,5 @@
 {
-  "compiled_at": "2026-04-20T00:00:00.000Z",
+  "compiled_at": "2026-05-02T00:00:00.000Z",
   "version": 2,
   "project": "NEXIO",
   "topics": [
@@ -24,6 +24,11 @@
     "docs/02-design/nexio-upgrade-plan.md",
     "docs/03-analysis/adaptive-engine.analysis.md",
     "docs/04-report/features/adaptive-engine.report.md",
+    "docs/01-plan/features/nexio.plan.md",
+    "docs/02-design/features/nexio.design.md",
+    "docs/operations/engine-runbook.md",
+    "docs/operations/runtime-risks.md",
+    "docs/project-plan.md",
     "src/app/api/engine/route.ts",
     "src/app/api/engine-control/route.ts",
     "src/app/api/daily-report/route.ts",
@@ -53,9 +58,9 @@
     "supabase/migrations/20260420000001_portfolio_snapshots.sql",
     "src/components/settings/engine-control-section.tsx"
   ],
-  "knowledge_files_read": 12,
-  "source_files_read": 28,
+  "knowledge_files_read": 16,
+  "source_files_read": 30,
   "total_articles": 7,
-  "topics_updated": ["trading-engine", "signal-system", "adaptive-engine", "order-management", "database"],
+  "topics_updated": ["platform-overview", "trading-engine", "signal-system", "order-management", "deployment"],
   "status": "complete"
 }

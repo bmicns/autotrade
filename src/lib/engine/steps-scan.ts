@@ -5,7 +5,8 @@ import {
 import { getPrice, getDailyCandles, limitBuyOrder, getMinuteCandles } from "@/lib/engine/kis";
 import { hasDangerousDisclosure, getListingDate, applyStockFilter, applySectorFilter } from "@/lib/engine/filters";
 import { getInvestorTrend, scanSurgeStocks, scanInstitutionalBuys } from "@/lib/engine/market";
-import { openPosition, recordTradeMemory, getOpenPosition, getSectorCounts, savePendingOrder } from "@/lib/engine/db";
+import { getOpenPosition, getSectorCounts, savePendingOrder, recordTradeMemory } from "@/lib/engine/db";
+import { getStrategyBudget } from "@/lib/engine/strategies";
 import { type EngineAction, type StepContext, type MarketTrend } from "@/lib/engine/types";
 import { sendTradeAlert } from "@/lib/engine/notify";
 import { batchFetch, getOpeningBonus } from "@/lib/engine/steps";
@@ -14,6 +15,10 @@ import { batchFetch, getOpeningBonus } from "@/lib/engine/steps";
 function decideStrength(score: number, strongScore: number, weakScore: number): "strong" | "weak" | "none" {
   return score >= strongScore ? "strong" : score >= weakScore ? "weak" : "none";
 }
+
+const WATCHLIST_STRATEGY = "watchlist_pullback";
+const SURGE_STRATEGY = "surge_momentum";
+const INSTITUTIONAL_STRATEGY = "institutional_follow";
 
 // ═══ STEP 2: 관심종목 신호 분석 (매수) ═══
 export async function runStep2(
@@ -25,6 +30,8 @@ export async function runStep2(
 ): Promise<{ actions: EngineAction[]; tradeCount: number; scannedCount: number }> {
   const actions: EngineAction[] = [];
   let scannedCount = 0;
+  const allocationPct = ctx.strategyAllocations[WATCHLIST_STRATEGY];
+  const strategyBudget = getStrategyBudget(ctx.maxPerTrade, allocationPct);
 
   const sectorCounts = await getSectorCounts();
 
@@ -59,7 +66,6 @@ export async function runStep2(
     const totalBonus = openingBonus + investor.bonus + marketTrend.bonus;
     const adjustedScore = learnedSignal.totalScore + totalBonus;
     const adjustedStrength = decideStrength(adjustedScore, ctx.strongScore, ctx.weakScore);
-    const weightsSource: "learned" | "default" = ctx.customWeights ? "learned" : "default";
     const bonusTag = [
       openingBonus !== 0 ? `장초반 ${openingBonus > 0 ? "+" : ""}${openingBonus}` : "",
       investor.label ? `[${investor.label}]` : "",
@@ -98,7 +104,7 @@ export async function runStep2(
       const buyRatio = existingPos?.phase === "initial" ? 1 : 0.5;
       const positionSize = calcPositionSize(
         learnedSignal.raw.atr, price,
-        ctx.applied.targetRiskAmount, ctx.maxPerTrade, ctx.applied.atrMultipliers.stop
+        ctx.applied.targetRiskAmount, strategyBudget, ctx.applied.atrMultipliers.stop
       );
       const qty = Math.floor((positionSize * buyRatio) / price);
       if (qty <= 0) continue;
@@ -121,16 +127,21 @@ export async function runStep2(
           order_qty: qty,
           limit_price: result.limitPrice,
           signal_score: adjustedScore,
+          strategy_key: WATCHLIST_STRATEGY,
         });
-        if (!existingPos) {
-          await openPosition(code, name, result.limitPrice, qty, { ...learnedSignal, totalScore: adjustedScore }, "initial", sector ?? undefined);
-          await recordTradeMemory({
-            code, name, baseSignal, learnedSignal,
-            bonuses: { market: marketTrend.bonus, investor: investor.bonus, snapshot: openingBonus },
-            adjustedScore, weightsSource, positionSize: qty * result.limitPrice,
-          });
-        }
-        await sendTradeAlert({ type: "buy", code, name, qty, price: result.limitPrice, score: adjustedScore });
+        await sendTradeAlert({ type: "buy", code, name, qty, price: result.limitPrice, score: adjustedScore, strategyKey: WATCHLIST_STRATEGY, regime: learnedSignal.raw.regime });
+        await recordTradeMemory({
+          code, name,
+          baseSignal,
+          learnedSignal,
+          bonuses: { market: marketTrend.bonus, investor: investor.bonus, snapshot: openingBonus },
+          adjustedScore,
+          weightsSource: ctx.customWeights ? "learned" : "default",
+          positionSize: qty * result.limitPrice,
+          entryPrice: result.limitPrice,
+          stopLossPct: ctx.config.stopLoss,
+          takeProfitPct: ctx.config.takeProfit,
+        });
         tradeCount++;
         openPositionCount++;
       }
@@ -144,7 +155,15 @@ export async function runStep2(
           stock_code: code, stock_name: name,
           signal_score: adjustedScore,
           signal_comment: `${learnedSignal.comment}${bonusTag}`,
-          signal_data: { indicators: learnedSignal.indicators, raw: learnedSignal.raw, matchCount: learnedSignal.matchCount, openingBonus, institutionalBonus: investor.bonus },
+          signal_data: {
+            indicators: learnedSignal.indicators,
+            raw: learnedSignal.raw,
+            matchCount: learnedSignal.matchCount,
+            openingBonus,
+            institutionalBonus: investor.bonus,
+            strategyKey: WATCHLIST_STRATEGY,
+            allocationPct,
+          },
           source: "watchlist", status: "pending",
         });
       } catch { /* ignore */ }
@@ -175,6 +194,8 @@ export async function runStep3(
 ): Promise<{ actions: EngineAction[]; tradeCount: number; scannedCount: number }> {
   const actions: EngineAction[] = [];
   let scannedCount = 0;
+  const allocationPct = ctx.strategyAllocations[SURGE_STRATEGY];
+  const strategyBudget = getStrategyBudget(ctx.maxPerTrade, allocationPct);
 
   let openPositionCount = holdings.filter((h) => Number(h.hldg_qty) > 0).length;
   if (tradeCount >= ctx.maxDailyTrades || openPositionCount >= ctx.maxPositions) return { actions, tradeCount, scannedCount };
@@ -205,7 +226,6 @@ export async function runStep3(
     const surgeInvestor = sInvestorMap.get(code) ?? { orgn: 0, frgn: 0, bonus: 0, label: "" };
     const surgeAdjustedScore = surgeLearnedSignal.totalScore + surgeInvestor.bonus + marketTrend.bonus;
     const surgeAdjustedStrength = decideStrength(surgeAdjustedScore, ctx.strongScore, ctx.weakScore);
-    const surgeWeightsSource: "learned" | "default" = ctx.customWeights ? "learned" : "default";
     const surgeInvestorTag = [
       surgeInvestor.label ? `[${surgeInvestor.label}]` : "",
       marketTrend.label ? `[${marketTrend.label}]` : "",
@@ -241,7 +261,7 @@ export async function runStep3(
 
       const surgePositionSize = calcPositionSize(
         surgeLearnedSignal.raw.atr, price,
-        ctx.applied.targetRiskAmount, ctx.maxPerTrade, ctx.applied.atrMultipliers.stop
+        ctx.applied.targetRiskAmount, strategyBudget, ctx.applied.atrMultipliers.stop
       );
       const qty = Math.floor((surgePositionSize * 0.5) / price);
       if (qty <= 0) continue;
@@ -262,16 +282,21 @@ export async function runStep3(
           order_qty: qty,
           limit_price: result.limitPrice,
           signal_score: surgeAdjustedScore,
+          strategy_key: SURGE_STRATEGY,
         });
-        await openPosition(code, name, result.limitPrice, qty, { ...surgeLearnedSignal, totalScore: surgeAdjustedScore }, "initial", surgeSector ?? undefined);
+        await sendTradeAlert({ type: "surge_buy", code, name, qty, price: result.limitPrice, score: surgeAdjustedScore, strategyKey: SURGE_STRATEGY, regime: surgeLearnedSignal.raw.regime });
         await recordTradeMemory({
           code, name,
-          baseSignal: surgeBaseSignal, learnedSignal: surgeLearnedSignal,
+          baseSignal: surgeBaseSignal,
+          learnedSignal: surgeLearnedSignal,
           bonuses: { market: marketTrend.bonus, investor: surgeInvestor.bonus, snapshot: 0 },
-          adjustedScore: surgeAdjustedScore, weightsSource: surgeWeightsSource,
+          adjustedScore: surgeAdjustedScore,
+          weightsSource: ctx.customWeights ? "learned" : "default",
           positionSize: qty * result.limitPrice,
+          entryPrice: result.limitPrice,
+          stopLossPct: ctx.config.stopLoss,
+          takeProfitPct: ctx.config.takeProfit,
         });
-        await sendTradeAlert({ type: "surge_buy", code, name, qty, price: result.limitPrice, score: surgeAdjustedScore });
         tradeCount++;
         openPositionCount++;
       }
@@ -285,7 +310,14 @@ export async function runStep3(
           stock_code: code, stock_name: surgeName,
           signal_score: surgeAdjustedScore,
           signal_comment: `${surgeLearnedSignal.comment}${surgeInvestorTag}`,
-          signal_data: { indicators: surgeLearnedSignal.indicators, raw: surgeLearnedSignal.raw, matchCount: surgeLearnedSignal.matchCount, institutionalBonus: surgeInvestor.bonus },
+          signal_data: {
+            indicators: surgeLearnedSignal.indicators,
+            raw: surgeLearnedSignal.raw,
+            matchCount: surgeLearnedSignal.matchCount,
+            institutionalBonus: surgeInvestor.bonus,
+            strategyKey: SURGE_STRATEGY,
+            allocationPct,
+          },
           source: "surge", status: "pending",
         });
       } catch { /* ignore */ }
@@ -316,6 +348,8 @@ export async function runStep4(
 ): Promise<{ actions: EngineAction[]; tradeCount: number; scannedCount: number }> {
   const actions: EngineAction[] = [];
   let scannedCount = 0;
+  const allocationPct = ctx.strategyAllocations[INSTITUTIONAL_STRATEGY];
+  const strategyBudget = getStrategyBudget(ctx.maxPerTrade, allocationPct);
 
   let openPositionCount = holdings.filter((h) => Number(h.hldg_qty) > 0).length;
   if (tradeCount >= ctx.maxDailyTrades || openPositionCount >= ctx.maxPositions) {
@@ -388,7 +422,7 @@ export async function runStep4(
     }
 
     // 기관 추종 매수: 반액 고정 (분산 리스크 관리)
-    const qty = Math.floor((ctx.maxPerTrade * 0.5) / price);
+    const qty = Math.floor((strategyBudget * 0.5) / price);
     if (qty <= 0) continue;
 
     const result = await limitBuyOrder(ctx.config, code, qty, price);
@@ -404,10 +438,20 @@ export async function runStep4(
 
     if (result.success) {
       const syntheticScore = Math.round(orgn + (frgn > 0 ? frgn * 0.5 : 0));
-      await savePendingOrder({ stock_code: code, stock_name: name, order_no: result.ordNo ?? "", order_qty: qty, limit_price: result.limitPrice, signal_score: syntheticScore });
-      await openPosition(code, name, result.limitPrice, qty, { ...signal, strength: "strong", side: "buy", totalScore: syntheticScore, comment: `기관 추종 (${orgnLabel})` }, "initial", sector ?? undefined);
-      await recordTradeMemory({ code, name, baseSignal: signal, learnedSignal: signal, bonuses: { market: marketTrend.bonus, investor: Math.round(orgn * 2), snapshot: 0 }, adjustedScore: syntheticScore, weightsSource: "default", positionSize: qty * result.limitPrice });
-      await sendTradeAlert({ type: "buy", code, name, qty, price: result.limitPrice, score: syntheticScore });
+      await savePendingOrder({ stock_code: code, stock_name: name, order_no: result.ordNo ?? "", order_qty: qty, limit_price: result.limitPrice, signal_score: syntheticScore, strategy_key: INSTITUTIONAL_STRATEGY });
+      await sendTradeAlert({ type: "buy", code, name, qty, price: result.limitPrice, score: syntheticScore, strategyKey: INSTITUTIONAL_STRATEGY, regime: signal.raw.regime });
+      await recordTradeMemory({
+        code, name,
+        baseSignal: signal,
+        learnedSignal: signal,
+        bonuses: { market: marketTrend.bonus, investor: 0, snapshot: 0 },
+        adjustedScore: syntheticScore,
+        weightsSource: "default",
+        positionSize: qty * result.limitPrice,
+        entryPrice: result.limitPrice,
+        stopLossPct: ctx.config.stopLoss,
+        takeProfitPct: ctx.config.takeProfit,
+      });
       tradeCount++;
       openPositionCount++;
     }

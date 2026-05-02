@@ -2,7 +2,36 @@
 
 import { useState, useEffect } from "react";
 import { COLORS } from "@/lib/constants";
-import { setEngineEnabled, setMaxPositions as saveMaxPositionsAction, setMaxPerSector as saveMaxPerSectorAction } from "@/actions/engine-control";
+import {
+  setEngineEnabled,
+  setMaxPositions as saveMaxPositionsAction,
+  setMaxPerSector as saveMaxPerSectorAction,
+} from "@/actions/engine-control";
+
+const controlInputStyle: React.CSSProperties = {
+  flex: 1,
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1.5px solid ${COLORS.line}`,
+  background: COLORS.sub,
+  color: COLORS.ink,
+  fontSize: 16,
+  fontWeight: 700,
+  fontFamily: "inherit",
+  outline: "none",
+  textAlign: "center",
+};
+
+const saveButtonStyle: React.CSSProperties = {
+  padding: "10px 16px",
+  borderRadius: 10,
+  border: "none",
+  color: "#fff",
+  fontSize: 13,
+  fontWeight: 700,
+  cursor: "pointer",
+  fontFamily: "inherit",
+};
 
 export function EngineControlSection() {
   const [enabled, setEnabled] = useState(true);
@@ -117,22 +146,15 @@ export function EngineControlSection() {
             value={posInput}
             onChange={(e) => setPosInput(e.target.value)}
             min={1} max={20} step={1}
-            style={{
-              flex: 1, padding: "10px 12px", borderRadius: 10,
-              border: `1.5px solid ${COLORS.line}`, background: COLORS.sub,
-              color: COLORS.ink, fontSize: 16, fontWeight: 700,
-              fontFamily: "inherit", outline: "none", textAlign: "center",
-            }}
+            style={controlInputStyle}
           />
           <span style={{ fontSize: 13, color: COLORS.mid }}>종목</span>
           <button
             disabled={saving || Number(posInput) === maxPositions}
             onClick={saveMaxPositions}
             style={{
-              padding: "10px 16px", borderRadius: 10, border: "none",
+              ...saveButtonStyle,
               background: posSaved ? "#22C55E" : COLORS.ink, color: "#fff",
-              fontSize: 13, fontWeight: 700, cursor: "pointer",
-              fontFamily: "inherit",
               opacity: (saving || Number(posInput) === maxPositions) ? 0.5 : 1,
             }}
           >
@@ -153,22 +175,15 @@ export function EngineControlSection() {
             value={secInput}
             onChange={(e) => setSecInput(e.target.value)}
             min={1} max={10} step={1}
-            style={{
-              flex: 1, padding: "10px 12px", borderRadius: 10,
-              border: `1.5px solid ${COLORS.line}`, background: COLORS.sub,
-              color: COLORS.ink, fontSize: 16, fontWeight: 700,
-              fontFamily: "inherit", outline: "none", textAlign: "center",
-            }}
+            style={controlInputStyle}
           />
           <span style={{ fontSize: 13, color: COLORS.mid }}>종목</span>
           <button
             disabled={saving || Number(secInput) === maxPerSector}
             onClick={saveMaxPerSector}
             style={{
-              padding: "10px 16px", borderRadius: 10, border: "none",
+              ...saveButtonStyle,
               background: secSaved ? "#22C55E" : COLORS.ink, color: "#fff",
-              fontSize: 13, fontWeight: 700, cursor: "pointer",
-              fontFamily: "inherit",
               opacity: (saving || Number(secInput) === maxPerSector) ? 0.5 : 1,
             }}
           >

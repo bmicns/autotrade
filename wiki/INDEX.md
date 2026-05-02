@@ -1,8 +1,8 @@
 # NEXIO Wiki — 인덱스
 
-> **프로젝트**: NEXIO (AI 자동매매 시스템)  
-> **버전**: v5.2.1 (Phase 2 고도화 완료)  
-> **컴파일 날짜**: 2026-04-20  
+> **프로젝트**: NEXIO (AI 자동매매 시스템)
+> **버전**: v6.5.1 (v6.1 운영 안정성 + 코드 구조 개선 계획 반영)
+> **컴파일 날짜**: 2026-05-02
 > **배포**: https://nexio.vercel.app
 
 ---
@@ -55,9 +55,14 @@ src/
 ├── hooks/
 │   ├── usePendingSignals.ts     — 신호 승인 훅
 │   ├── useWatchlist.ts          — 관심종목 훅
-│   └── useStats.ts              — 통계 데이터 훅
+│   ├── useStats.ts              — 통계 데이터 훅
+│   ├── useStockSearch.ts        — 종목 검색 (debounce 300ms) [v6.1 계획]
+│   ├── useThresholdsOptimize.ts — 임계치 최적화 [v6.1 계획]
+│   ├── usePositions.ts          — 포지션 조회 [v6.1 계획]
+│   ├── usePortfolioSnapshot.ts  — 스냅샷 조회 [v6.1 계획]
+│   └── useNews.ts               — 뉴스 피드 [v6.1 계획]
 └── components/
-    ├── signal/                  — 신호 탭 UI
+    ├── signal/                  — 신호 탭 UI (관심종목 탭 제거 예정 → StrategyTab 이동)
     ├── stats/                   — 통계 탭 UI (learning-section 포함)
     ├── portfolio/               — 포트폴리오 UI
     └── settings/                — 설정 UI
@@ -95,6 +100,10 @@ src/
 | `/api/engine-control` | POST | 비상 정지 / 최대 포지션 수 변경 (인증 미설정 — 수정 예정) |
 | `/api/daily-report` | GET | 일일 매매 결과 텔레그램 발송 (CRON_SECRET 필수) |
 | `/api/positions` | GET | 현재 포지션 조회 |
+| `/api/kis/health` | GET | KIS 연결 상태 Health Check (세션 인증, 60초 폴링용) [v6.1 계획] |
+| `/api/stock-search` | GET | 종목명/코드 검색 (?q=) |
+| `/api/optimize-thresholds` | GET | 신호 임계치 자동 최적화 계산 |
+| `/api/news` | GET | 주요 경제/시장 뉴스 피드 |
 
 ### GitHub Actions 크론 스케줄
 
@@ -112,13 +121,14 @@ src/
 
 | 버전 | 날짜 | 주요 변경 |
 |------|------|----------|
+| v6.5.1 | 2026-05-02 | v6.1 운영 안정성 계획 반영 (KIS Health Check, notify.ts 알림 강화, 컴포넌트 훅 추출 설계, 운영 런북/리스크 문서 추가) |
 | v5.2.1 | 2026-04-20 | Phase 2: 10종 지표(StochRSI/OBV/이격도), 2단계 익절, 시장급락 차단, 체결확인 루프, 콜드스타트 수정, portfolio_snapshots/pending_orders 테이블 |
 | v5.14.0 | 2026-04-17 | steps.ts 분리, notify.ts(텔레그램), engine-control API, daily-report API, app_config 테이블 |
 | v5.9.x | 2026-04-17 | lib/engine/* 모듈 분리, batchFetch N+1 해소, KIS 자격증명 보안, GitHub Actions 크론 |
 | v5.9.0 | 2026-04-11 | 적응형 학습 엔진 전체 (P1~P6) |
-| v5.2.1 | (이전) | watchlist/신호승인/주문에러처리 |
 
 ## Recent Changes
+- 2026-05-02: 5개 토픽 업데이트 — v6.1 nexio.plan.md + nexio.design.md 반영 (KIS Health Check API, notify.ts 신규 함수 2종, KISHealthStatus/KISApiErrorContext 타입, SignalTab 구조 변경, 훅 추출 계획, silent catch 목록, 운영 런북/리스크 문서화)
 - 2026-04-20: 5개 토픽 업데이트 — 10종 지표(+StochRSI/OBV/이격도), 2단계 익절, 시장급락 차단, 체결확인 루프, 콜드스타트 블렌딩, pending_orders/portfolio_snapshots 테이블 신규
 - 2026-04-17: 3개 토픽 업데이트 — steps.ts/notify.ts 신규, engine-control/daily-report API, app_config 테이블
 - 2026-04-17: 6개 토픽 전면 재컴파일 — lib/engine 모듈화, GitHub Actions 크론, 보안/성능 개선 반영

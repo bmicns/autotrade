@@ -5,6 +5,11 @@
 //   ADD COLUMN IF NOT EXISTS partial_exit_price integer DEFAULT NULL,
 //   ADD COLUMN IF NOT EXISTS partial_exit_qty integer DEFAULT NULL;
 // ─────────────────────────────────────────────────────────────────────────────
+// [Supabase SQL Editor에서 실행] ATR 정확도 추적용 컬럼 추가
+// ALTER TABLE trade_memory
+//   ADD COLUMN IF NOT EXISTS stop_price integer DEFAULT NULL,
+//   ADD COLUMN IF NOT EXISTS profit_price integer DEFAULT NULL;
+// ─────────────────────────────────────────────────────────────────────────────
 // [Supabase SQL Editor에서 실행] pending_orders 테이블 생성
 // CREATE TABLE IF NOT EXISTS pending_orders (
 //   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -19,6 +24,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { supabase } from "@/lib/supabase/api-client";
 import { type SignalResult } from "@/lib/kis/indicators";
+import { type StrategyKey } from "@/lib/engine/strategies";
 
 
 
@@ -31,10 +37,23 @@ export function extractCandlePattern(signal: SignalResult): string {
 // ─── Supabase 포지션 관리 ────────────────────────
 export async function openPosition(code: string, name: string | null, price: number, qty: number, signal: SignalResult, phase: "initial" | "full", sector?: string) {
   try {
+    const strategySignal = signal as SignalResult & {
+      strategyKey?: StrategyKey;
+      allocationPct?: number;
+      sourceStrategy?: string;
+    };
     await supabase.from("positions").insert({
       stock_code: code, stock_name: name,
       entry_price: price, entry_qty: qty,
-      entry_signal: { indicators: signal.indicators, raw: signal.raw, matchCount: signal.matchCount, totalScore: signal.totalScore },
+      entry_signal: {
+        indicators: signal.indicators,
+        raw: signal.raw,
+        matchCount: signal.matchCount,
+        totalScore: signal.totalScore,
+        strategyKey: strategySignal.strategyKey ?? null,
+        allocationPct: strategySignal.allocationPct ?? null,
+        sourceStrategy: strategySignal.sourceStrategy ?? null,
+      },
       signal_strength: signal.strength,
       phase, status: "open",
       sector: sector ?? null,
@@ -125,9 +144,18 @@ export async function recordTradeMemory(params: {
   adjustedScore: number;
   weightsSource: "learned" | "default";
   positionSize: number;
+  entryPrice?: number;
+  stopLossPct?: number;
+  takeProfitPct?: number;
 }): Promise<void> {
   try {
     const raw = params.learnedSignal.raw;
+    const stopPrice   = params.entryPrice && params.stopLossPct
+      ? Math.round(params.entryPrice * (1 - params.stopLossPct / 100))
+      : null;
+    const profitPrice = params.entryPrice && params.takeProfitPct
+      ? Math.round(params.entryPrice * (1 + params.takeProfitPct / 100))
+      : null;
     await supabase.from("trade_memory").insert({
       stock_code: params.code,
       stock_name: params.name,
@@ -148,6 +176,8 @@ export async function recordTradeMemory(params: {
       weights_source: params.weightsSource,
       atr_value: raw.atr,
       position_size: params.positionSize,
+      stop_price: stopPrice,
+      profit_price: profitPrice,
     });
   } catch { /* ignore */ }
 }
@@ -246,6 +276,8 @@ export async function logEngineRun(tradeCount: number, actions: unknown[], scann
 }
 
 // ─── pending_orders 헬퍼 ─────────────────────────
+// [Supabase SQL Editor에서 실행] strategy_key 컬럼 추가
+// ALTER TABLE pending_orders ADD COLUMN IF NOT EXISTS strategy_key text DEFAULT NULL;
 export interface PendingOrder {
   id: string;
   stock_code: string;
@@ -254,6 +286,7 @@ export interface PendingOrder {
   order_qty: number;
   limit_price: number;
   signal_score: number | null;
+  strategy_key: string | null;
   created_at: string;
 }
 
@@ -264,6 +297,7 @@ export async function savePendingOrder(params: {
   order_qty: number;
   limit_price: number;
   signal_score?: number | null;
+  strategy_key?: string | null;
 }): Promise<void> {
   try {
     await supabase.from("pending_orders").insert({
@@ -273,6 +307,7 @@ export async function savePendingOrder(params: {
       order_qty: params.order_qty,
       limit_price: params.limit_price,
       signal_score: params.signal_score ?? null,
+      strategy_key: params.strategy_key ?? null,
     });
   } catch { /* ignore */ }
 }

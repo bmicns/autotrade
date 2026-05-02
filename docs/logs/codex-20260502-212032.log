@@ -1,0 +1,38 @@
+완료됐습니다. 수정 내용 정리:
+
+---
+
+### G1 — `src/lib/store.ts` (P1)
+
+**변경 사항:**
+- `poll()` 즉시 1회 호출 추가 → 앱 시작 직후 60초 `null` 상태 노출 제거
+- 모듈 스코프에 `healthPollActive` 플래그 추가
+
+**엣지 케이스 처리:**
+- `stopHealthPolling()` 호출 후 in-flight 응답이 뒤늦게 도착해도 `healthPollActive` 체크로 상태 갱신 차단
+- `clearInterval` 전에 `healthPollActive = false` 먼저 설정 → 네트워크 지연 상황에서도 stale 업데이트 방지
+- 중복 인터벌 방지 로직(`healthPollHandle !== null`) 그대로 유지
+
+---
+
+### G2 — `docs/02-design/features/nexio.design.md` (P2)
+
+**변경 사항:**
+- 항목 13 문구: `"useStockSearch 훅 적용 (직접 fetch 제거)"` → `"직접 fetch 제거 (useStockSearch는 watchlist-section으로 이동)"`
+- 실제 구현과 일치 — signal-tab에는 useStockSearch가 없고 watchlist-section.tsx에 있음
+
+---
+
+```
+─────────────────────────────────────────────────
+📋 플랫폼 개발 원칙 점검
+─────────────────────────────────────────────────
+1. 페이지 500줄 제한   : ✅ 준수 (store.ts 462줄)
+2. 단일 책임           : ✅ 준수
+3. 서버 검증·보안      : ✅ 준수
+4. 성능 (중복·N+1)     : ✅ 준수 (중복 인터벌 방지 그대로 유지)
+5. 폴더 구조           : ✅ 준수
+─────────────────────────────────────────────────
+위반 항목: 없음
+─────────────────────────────────────────────────
+```

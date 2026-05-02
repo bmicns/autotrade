@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 
 const MAX_BATCH = 20;
 
@@ -36,6 +36,9 @@ async function fetchCandles(
 // POST /api/kis/candles/batch — 최대 20개 종목 캔들 일괄 조회 (100ms 간격)
 export async function POST(req: NextRequest) {
   try {
+    const supabaseError = getSupabaseConfigError();
+    if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
     const body = await req.json();
     const codes: string[] = Array.isArray(body?.codes) ? body.codes.slice(0, MAX_BATCH) : [];
 

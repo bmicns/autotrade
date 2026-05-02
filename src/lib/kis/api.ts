@@ -1,4 +1,4 @@
-import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
+import { KIS_API_BASE, KIS_TR } from "@/lib/constants";
 
 interface KISConfig {
   appKey: string;
@@ -7,9 +7,23 @@ interface KISConfig {
   token?: string;
 }
 
+export class KISError extends Error {
+  status: number;
+  detail: string;
+  kisCode?: string;  // KIS error_code (예: "EGW00123")
+
+  constructor(message: string, status: number, detail?: string, kisCode?: string) {
+    super(message);
+    this.name = "KISError";
+    this.status = status;
+    this.detail = detail ?? message;
+    this.kisCode = kisCode;
+  }
+}
+
 // 토큰 발급
 export async function getToken(appKey: string, appSecret: string) {
-  const res = await fetch(`${KIS_VTS_BASE}/oauth2/tokenP`, {
+  const res = await fetch(`${KIS_API_BASE}/oauth2/tokenP`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -18,7 +32,18 @@ export async function getToken(appKey: string, appSecret: string) {
       appsecret: appSecret,
     }),
   });
-  if (!res.ok) throw new Error(`KIS token error: ${res.status}`);
+  if (!res.ok) {
+    const raw = await res.text().catch(() => "");
+    let detail = raw.trim();
+    let kisCode: string | undefined;
+    try {
+      const parsed = JSON.parse(raw) as { msg1?: string; msg_cd?: string; error_description?: string; error?: string; error_code?: string };
+      detail = parsed.error_description || parsed.msg1 || parsed.error || raw.trim();
+      // error_code 또는 msg_cd가 코드, error가 코드처럼 보이면 (공백 없음) 사용
+      kisCode = parsed.error_code || parsed.msg_cd || (parsed.error && !parsed.error.includes(" ") ? parsed.error : undefined);
+    } catch { /* keep raw text */ }
+    throw new KISError(`KIS token error: ${res.status}`, res.status, detail || `HTTP ${res.status}`, kisCode);
+  }
   const data = await res.json();
   return data.access_token as string;
 }
@@ -41,7 +66,7 @@ export async function getPrice(config: KISConfig, stockCode: string) {
     fid_input_iscd: stockCode,
   });
   const res = await fetch(
-    `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`,
+    `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`,
     { headers: headers(config, KIS_TR.PRICE) }
   );
   if (!res.ok) throw new Error(`KIS price error: ${res.status}`);
@@ -65,10 +90,20 @@ export async function getBalance(config: KISConfig) {
     CTX_AREA_NK100: "",
   });
   const res = await fetch(
-    `${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`,
+    `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`,
     { headers: headers(config, KIS_TR.BALANCE) }
   );
-  if (!res.ok) throw new Error(`KIS balance error: ${res.status}`);
+  if (!res.ok) {
+    const raw = await res.text().catch(() => "");
+    let detail = raw.trim();
+    let kisCode: string | undefined;
+    try {
+      const parsed = JSON.parse(raw) as { msg1?: string; msg_cd?: string; error_description?: string; error?: string; rt_cd?: string };
+      detail = parsed.msg1 || parsed.error_description || parsed.error || raw.trim();
+      kisCode = parsed.msg_cd || (parsed.error && !parsed.error.includes(" ") ? parsed.error : undefined);
+    } catch { /* keep raw text */ }
+    throw new KISError(`KIS balance error: ${res.status}`, res.status, detail || `HTTP ${res.status}`, kisCode);
+  }
   return res.json();
 }
 
@@ -92,7 +127,7 @@ export async function placeOrder(
     ORD_UNPR: orderType === "01" ? "0" : String(price),
   };
   const res = await fetch(
-    `${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`,
+    `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`,
     {
       method: "POST",
       headers: headers(config, trId),
@@ -124,7 +159,7 @@ export async function getOrderHistory(config: KISConfig) {
     CTX_AREA_NK100: "",
   });
   const res = await fetch(
-    `${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/inquire-daily-ccld?${params}`,
+    `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-daily-ccld?${params}`,
     { headers: headers(config, KIS_TR.ORDER_HISTORY) }
   );
   if (!res.ok) throw new Error(`KIS history error: ${res.status}`);

@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextResponse } from "next/server";
 
 
@@ -18,6 +18,9 @@ export interface StockStat {
 // GET /api/stats/stocks — 종목별 성과 집계
 export async function GET() {
   try {
+    const supabaseError = getSupabaseConfigError();
+    if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
     const { data, error } = await supabase
       .from("trade_memory")
       .select("stock_code, stock_name, is_win, pnl_percent, pnl_amount, closed_at")

@@ -87,6 +87,24 @@ export interface KISPriceOutput {
   [key: string]: string | undefined;
 }
 
+// KIS 연결 상태 (Health Check 응답 + store 상태)
+export interface KISHealthStatus {
+  connected: boolean;
+  lastChecked: string;      // ISO 8601 (KST)
+  latencyMs: number;
+  errorCode?: string;       // KIS API error_code (예: "EGW00123")
+  errorMessage?: string;    // KIS API error_description
+}
+
+// Telegram 알림 컨텍스트 (비밀키 포함 금지)
+export interface KISApiErrorContext {
+  operation: "token" | "balance" | "order" | "price";
+  httpStatus?: number;      // HTTP 응답 코드
+  kisCode?: string;         // KIS error_code
+  kisMessage?: string;      // KIS error_description (200자 이하로 잘라서 전송)
+  timestamp: string;        // ISO 8601
+}
+
 export interface StepContext {
   config: EngineConfig;
   applied: import("@/lib/learning").AppliedLearning;
@@ -100,5 +118,6 @@ export interface StepContext {
   weakScore: number;      // 약한 신호 점수 기준
   rsiBuy: number;         // RSI 매수 임계값
   rsiSell: number;        // RSI 매도 임계값
+  strategyAllocations: import("@/lib/engine/strategies").StrategyAllocations;
   customWeights: { trending: Record<string, number>; ranging: Record<string, number> } | undefined;
 }

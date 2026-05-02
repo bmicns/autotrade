@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { COLORS } from "@/lib/constants";
 import { TradeSettings } from "@/lib/store";
 
@@ -32,23 +32,29 @@ interface Props {
 }
 
 export function TradeEditSheet({ meta, ts, onSave, onClose }: Props) {
-  const [value, setValue]   = useState("");
-  const [value2, setValue2] = useState("");
-  const [ratio, setRatio]   = useState("");
-
-  useEffect(() => {
+  const [value, setValue] = useState(() => {
     switch (meta.key) {
-      case "maxAmountPerTrade":  setValue(String(ts.maxAmountPerTrade)); break;
-      case "maxTradesPerDay":    setValue(String(ts.maxTradesPerDay)); break;
-      case "stopLoss":           setValue(String(ts.stopLoss)); break;
-      case "takeProfit":         setValue(String(ts.takeProfit)); setRatio(String(ts.takeProfitRatio)); break;
-      case "trailingStop":       setValue(String(ts.trailingStop)); break;
-      case "dailyLossLimit":     setValue(String(ts.dailyLossLimit)); break;
-      case "maxHoldDays":        setValue(String(ts.maxHoldDays)); break;
-      case "morningSession":     setValue(ts.morningStart); setValue2(ts.morningEnd); break;
-      case "afternoonSession":   setValue(ts.afternoonStart); setValue2(ts.afternoonEnd); break;
+      case "maxAmountPerTrade": return String(ts.maxAmountPerTrade);
+      case "maxTradesPerDay": return String(ts.maxTradesPerDay);
+      case "stopLoss": return String(ts.stopLoss);
+      case "takeProfit": return String(ts.takeProfit);
+      case "trailingStop": return String(ts.trailingStop);
+      case "dailyLossLimit": return String(ts.dailyLossLimit);
+      case "maxHoldDays": return String(ts.maxHoldDays);
+      case "morningSession": return ts.morningStart;
+      case "afternoonSession": return ts.afternoonStart;
     }
-  }, [meta.key, ts]);
+  });
+  const [value2, setValue2] = useState(() => {
+    switch (meta.key) {
+      case "morningSession": return ts.morningEnd;
+      case "afternoonSession": return ts.afternoonEnd;
+      default: return "";
+    }
+  });
+  const [ratio, setRatio] = useState(() => (
+    meta.key === "takeProfit" ? String(ts.takeProfitRatio) : ""
+  ));
 
   const handleSave = () => {
     switch (meta.key) {

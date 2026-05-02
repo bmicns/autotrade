@@ -1,9 +1,12 @@
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextResponse } from "next/server";
 
 
 export async function GET() {
   try {
+    const supabaseError = getSupabaseConfigError();
+    if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
     const { data, error } = await supabase
       .from("positions")
       .select("stock_code, entry_date, entry_price, entry_qty")

@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import { fetchBalance, fetchPrices } from "./kis/client";
 
+// 헬스 폴링 핸들 — 단일 인터벌 보장 (모듈 스코프)
+let healthPollHandle: ReturnType<typeof setInterval> | null = null;
+// in-flight 응답이 stop 이후에 도착해도 상태를 덮어쓰지 않도록 하는 플래그
+let healthPollActive = false;
+
 type Tab = "home" | "signal" | "portfolio" | "stats" | "strategy" | "settings";
 
 export interface Holding {
@@ -113,6 +118,12 @@ interface AppState {
   kisLoading: boolean;
   kisConnected: boolean;
   fetchKISData: () => Promise<void>;
+
+  // KIS Health 폴링 상태
+  kisHealthLastChecked: string | null;
+  kisLatencyMs: number | null;
+  startHealthPolling: () => void;
+  stopHealthPolling: () => void;
 
   // 대기 신호 뱃지
   pendingCount: number;
@@ -231,6 +242,48 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   kisLoading: false,
   kisConnected: false,
+
+  kisHealthLastChecked: null,
+  kisLatencyMs: null,
+
+  startHealthPolling: () => {
+    if (healthPollHandle !== null) return; // 중복 인터벌 방지
+    healthPollActive = true;
+    const poll = async () => {
+      if (!healthPollActive) return;
+      try {
+        const res = await fetch("/api/kis/health");
+        // 응답 수신 전에 stopHealthPolling이 호출된 경우 상태 갱신 생략
+        if (!healthPollActive) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (!healthPollActive) return;
+          set({
+            kisConnected: data.connected,
+            kisHealthLastChecked: data.lastChecked ?? null,
+            kisLatencyMs: typeof data.latencyMs === "number" ? data.latencyMs : null,
+          });
+        }
+      } catch { /* 무시 */ }
+    };
+    poll(); // 즉시 1회 실행 — 앱 시작 직후 null 상태 60초 노출 방지
+    healthPollHandle = setInterval(poll, 60_000);
+  },
+
+  stopHealthPolling: () => {
+    healthPollActive = false;
+    if (healthPollHandle !== null) {
+      clearInterval(healthPollHandle);
+      healthPollHandle = null;
+    }
+  },
+
+  stopHealthPolling: () => {
+    if (healthPollHandle !== null) {
+      clearInterval(healthPollHandle);
+      healthPollHandle = null;
+    }
+  },
 
   pendingCount: 0,
   fetchPendingCount: async () => {
@@ -408,9 +461,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const tradeSettings = loadFromStorage<TradeSettings>("nx-trade-settings", get().tradeSettings);
     set({ holdings, trades, kisConfig, tradeSettings, ...summary });
 
-    // appKey가 있으면 자동으로 KIS 데이터 로드 (토큰은 fetchKISData가 자동 관리)
+    // appKey가 있으면 자동으로 KIS 데이터 로드 + 헬스 폴링 시작
     if (kisConfig.appKey && kisConfig.appSecret && kisConfig.accountNo) {
       get().fetchKISData();
+      get().startHealthPolling();
     }
 
     // 대기 신호 뱃지 로드

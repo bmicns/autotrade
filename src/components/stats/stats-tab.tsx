@@ -7,6 +7,7 @@ import { BacktestSection } from "@/components/stats/backtest-section";
 import { LearningSection } from "@/components/stats/learning-section";
 import { StockStatsSection } from "@/components/stats/stock-stats-section";
 import { EngineLogSection } from "@/components/stats/engine-log-section";
+import { PortfolioChart } from "@/components/stats/portfolio-chart";
 import { useStats, type Period } from "@/hooks/useStats";
 
 const PERIODS: { id: Period; label: string }[] = [
@@ -110,6 +111,8 @@ export function StatsTab() {
           </div>
         ))}
       </div>
+
+      <PortfolioChart />
 
       <div style={{ height: 1, background: COLORS.line }} />
 
@@ -304,6 +307,7 @@ export function StatsTab() {
         isExpired={learningData?.isExpired ?? true}
         history={learningData?.history ?? []}
         abStats={learningData?.abStats}
+        tradeMemoryCount={learningData?.tradeMemoryCount}
       />
 
       {/* ── 종목별 성과 ── */}

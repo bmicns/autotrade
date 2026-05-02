@@ -1,9 +1,12 @@
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 
 
 // GET: 관심종목 목록 조회
 export async function GET() {
+  const supabaseError = getSupabaseConfigError();
+  if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
   const { data, error } = await supabase
     .from("watchlist")
     .select("*")
@@ -19,6 +22,9 @@ function validateCode(code: unknown): code is string {
 
 // POST: 관심종목 추가
 export async function POST(req: NextRequest) {
+  const supabaseError = getSupabaseConfigError();
+  if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
   const { code, name } = await req.json();
   if (!validateCode(code)) return NextResponse.json({ error: "유효하지 않은 종목코드입니다" }, { status: 400 });
 
@@ -34,6 +40,9 @@ export async function POST(req: NextRequest) {
 
 // DELETE: 관심종목 삭제
 export async function DELETE(req: NextRequest) {
+  const supabaseError = getSupabaseConfigError();
+  if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
   const { code } = await req.json();
   if (!validateCode(code)) return NextResponse.json({ error: "유효하지 않은 종목코드입니다" }, { status: 400 });
 

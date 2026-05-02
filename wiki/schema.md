@@ -1,6 +1,6 @@
 # NEXIO DB Schema 레퍼런스
 
-> 컴파일 날짜: 2026-04-12  
+> 컴파일 날짜: 2026-05-02
 > Supabase 프로젝트: bcxjyxfflcgmyltnxben
 
 ---
@@ -102,3 +102,35 @@ export const DEFAULT_ATR_MULTIPLIERS: AtrMultipliers = {
 ```
 
 하한 가드: `stopLoss <= -2, takeProfit >= 3, trailingStop <= -1.5`
+
+---
+
+## KISHealthStatus (v6.1 신규, src/lib/engine/types.ts)
+
+KIS 연결 상태 표현 타입. `/api/kis/health` 응답과 `store.ts` 상태에 사용된다.
+
+```typescript
+export interface KISHealthStatus {
+  connected: boolean;
+  lastChecked: string;      // ISO 8601 (KST)
+  latencyMs: number;
+  errorCode?: string;       // KIS API error_code (예: "EGW00123")
+  errorMessage?: string;    // KIS API error_description
+}
+```
+
+---
+
+## KISApiErrorContext (v6.1 신규, src/lib/engine/types.ts)
+
+Telegram 알림 컨텍스트. `sendKISApiErrorAlert()` 호출 시 전달. 비밀키 포함 금지.
+
+```typescript
+export interface KISApiErrorContext {
+  operation: "token" | "balance" | "order" | "price";
+  httpStatus?: number;      // HTTP 응답 코드
+  kisCode?: string;         // KIS error_code
+  kisMessage?: string;      // KIS error_description (200자 이하)
+  timestamp: string;        // ISO 8601
+}
+```

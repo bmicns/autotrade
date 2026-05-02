@@ -1,3 +1,5 @@
+import type { KISApiErrorContext } from "@/lib/engine/types";
+
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const TG_URL = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage` : "";
@@ -21,10 +23,23 @@ export interface TradeAlertParams {
   price: number;
   score?: number;
   pnlPct?: number;
+  strategyKey?: string;
+  regime?: string;
 }
 
+const STRATEGY_LABELS: Record<string, string> = {
+  watchlist_pullback: "관심종목",
+  surge_momentum: "급등모멘텀",
+  institutional_follow: "기관추종",
+};
+
+const REGIME_LABELS: Record<string, string> = {
+  trending: "추세장",
+  ranging: "횡보장",
+};
+
 export async function sendTradeAlert(params: TradeAlertParams): Promise<void> {
-  const { type, code, name, qty, price, score, pnlPct } = params;
+  const { type, code, name, qty, price, score, pnlPct, strategyKey, regime } = params;
 
   const typeLabel: Record<string, string> = {
     buy: "🟢 매수 체결",
@@ -42,6 +57,10 @@ export async function sendTradeAlert(params: TradeAlertParams): Promise<void> {
   ];
   if (score !== undefined) lines.push(`점수: ${score}점`);
   if (pnlPct !== undefined) lines.push(`손익: ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`);
+  const tags: string[] = [];
+  if (strategyKey) tags.push(STRATEGY_LABELS[strategyKey] ?? strategyKey);
+  if (regime) tags.push(REGIME_LABELS[regime] ?? regime);
+  if (tags.length > 0) lines.push(`태그: ${tags.join(" · ")}`);
 
   await sendMessage(lines.join("\n"));
 }
@@ -85,6 +104,19 @@ export async function sendDailyReport(params: DailyReportParams): Promise<void> 
   await sendMessage(lines.join("\n"));
 }
 
+export async function sendEngineErrorAlert(msg: string, durationMs: number): Promise<void> {
+  const kstNow = new Date(Date.now() + 9 * 3600000);
+  const timeStr = kstNow.toISOString().slice(11, 16);
+  const lines = [
+    `<b>[NEXIO] ⚠️ 엔진 오류 발생</b>`,
+    `시각: ${timeStr} KST`,
+    `오류: ${msg.slice(0, 200)}`,
+    `실행시간: ${(durationMs / 1000).toFixed(1)}s`,
+    `→ 다음 크론에서 자동 재시도`,
+  ];
+  await sendMessage(lines.join("\n"));
+}
+
 export async function sendMarketCloseAlert(cancelled: number, failed: number, mismatches: string[]): Promise<void> {
   const lines = [
     `<b>[NEXIO] 장 마감 정산</b>`,
@@ -96,4 +128,30 @@ export async function sendMarketCloseAlert(cancelled: number, failed: number, mi
     lines.push(`포지션 정합: 이상 없음`);
   }
   await sendMessage(lines.join("\n"));
+}
+
+// KIS API 에러 발생 시 — 서버 API route에서만 호출. 비밀키/토큰 절대 포함 금지.
+export async function sendKISApiErrorAlert(ctx: KISApiErrorContext): Promise<void> {
+  const opLabel: Record<string, string> = {
+    token: "토큰 발급", balance: "잔고 조회", order: "주문", price: "시세 조회",
+  };
+  const kstNow = new Date(Date.now() + 9 * 3600000);
+  const timeStr = kstNow.toISOString().slice(11, 16);
+  const lines = [
+    `<b>[NEXIO] ⚠️ KIS API 오류</b>`,
+    `작업: ${opLabel[ctx.operation] ?? ctx.operation}`,
+    `시각: ${timeStr} KST`,
+  ];
+  if (ctx.httpStatus !== undefined) lines.push(`HTTP: ${ctx.httpStatus}`);
+  if (ctx.kisCode) lines.push(`코드: ${ctx.kisCode}`);
+  if (ctx.kisMessage) lines.push(`메시지: ${ctx.kisMessage.slice(0, 200)}`);
+  await sendMessage(lines.join("\n"));
+}
+
+// 연결 상태 변화 시 — /api/kis/health에서만 호출
+export async function sendKISConnectionAlert(type: "disconnected" | "reconnected"): Promise<void> {
+  const kstNow = new Date(Date.now() + 9 * 3600000);
+  const timeStr = kstNow.toISOString().slice(11, 16);
+  const label = type === "disconnected" ? "🔴 KIS 연결 끊김" : "🟢 KIS 재연결";
+  await sendMessage([`<b>[NEXIO] ${label}</b>`, `시각: ${timeStr} KST`].join("\n"));
 }

@@ -1,9 +1,9 @@
 // ─── KIS API 호출 함수 ───────────────────────────
-import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
+import { KIS_API_BASE, KIS_TR } from "@/lib/constants";
 import type { MinuteCandle } from "@/lib/engine/intraday";
 import { type DailyCandle } from "@/lib/kis/indicators";
 import { type EngineConfig, type OrderResult, type OpenOrder } from "./types";
-import { KIS_RATE_LIMIT_DELAY_MS, LIMIT_BUY_DISCOUNT } from "./constants";
+import { KIS_RATE_LIMIT_DELAY_MS } from "./constants";
 
 type KISCreds = Pick<EngineConfig, "appKey" | "appSecret" | "accountNo" | "token">;
 
@@ -18,7 +18,7 @@ export function headers(config: KISCreds, trId: string) {
 
 export async function getPrice(config: EngineConfig, code: string) {
   const params = new URLSearchParams({ fid_cond_mrkt_div_code: "J", fid_input_iscd: code });
-  const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`, {
+  const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`, {
     headers: headers(config, KIS_TR.PRICE),
   });
   if (!res.ok) return null;
@@ -31,7 +31,7 @@ export async function getDailyCandles(config: EngineConfig, code: string): Promi
     fid_input_date_1: "", fid_input_date_2: "",
     fid_period_div_code: "D", fid_org_adj_prc: "0",
   });
-  const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?${params}`, {
+  const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?${params}`, {
     headers: headers(config, "FHKST03010100"),
   });
   if (!res.ok) return [];
@@ -51,17 +51,17 @@ export async function getBalance(config: EngineConfig) {
     FUND_STTL_ICLD_YN: "N", FNCG_AMT_AUTO_RDPT_YN: "N", PRCS_DVSN: "00",
     CTX_AREA_FK100: "", CTX_AREA_NK100: "",
   });
-  const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`, {
+  const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`, {
     headers: headers(config, KIS_TR.BALANCE),
   });
   if (!res.ok) return null;
   return res.json();
 }
 
-export async function executeOrder(config: EngineConfig, trId: string, code: string, qty: number, side: "buy" | "sell"): Promise<OrderResult> {
+export async function executeOrder(config: EngineConfig, trId: string, code: string, qty: number): Promise<OrderResult> {
   const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
   try {
-    const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
+    const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
       method: "POST", headers: headers(config, trId),
       body: JSON.stringify({ CANO: cano, ACNT_PRDT_CD: acntPrdtCd, PDNO: code, ORD_DVSN: "01", ORD_QTY: String(qty), ORD_UNPR: "0" }),
     });
@@ -86,11 +86,11 @@ export async function executeOrder(config: EngineConfig, trId: string, code: str
 }
 
 export async function sellOrder(config: EngineConfig, code: string, qty: number): Promise<OrderResult> {
-  return executeOrder(config, KIS_TR.SELL, code, qty, "sell");
+  return executeOrder(config, KIS_TR.SELL, code, qty);
 }
 
 export async function buyOrder(config: EngineConfig, code: string, qty: number): Promise<OrderResult> {
-  return executeOrder(config, KIS_TR.BUY, code, qty, "buy");
+  return executeOrder(config, KIS_TR.BUY, code, qty);
 }
 
 // ─── 호가 단위 반올림 (KRX 기준) ────────────────
@@ -104,12 +104,12 @@ export function roundToTick(price: number): number {
   return Math.round(price / 1000) * 1000;
 }
 
-// ─── 지정가 매수 (현재가 -0.5%) ─────────────────
+// ─── 지정가 매수 (현재가 -0.2%) ─────────────────
 export async function limitBuyOrder(config: EngineConfig, code: string, qty: number, currentPrice: number): Promise<OrderResult & { limitPrice: number }> {
-  const limitPrice = roundToTick(currentPrice * LIMIT_BUY_DISCOUNT);
+  const limitPrice = roundToTick(currentPrice * 0.998);
   const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
   try {
-    const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
+    const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
       method: "POST", headers: headers(config, KIS_TR.BUY),
       body: JSON.stringify({
         CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
@@ -152,7 +152,7 @@ export async function checkOrderFill(
       CTX_AREA_FK100: "", CTX_AREA_NK100: "",
     });
     const res = await fetch(
-      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/inquire-ccnl?${params}`,
+      `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-ccnl?${params}`,
       { headers: headers(config, "VTTC8001R") },
     );
     if (!res.ok) return { filled: false, filledQty: 0, filledPrice: 0 };
@@ -177,7 +177,7 @@ export async function getMinuteCandles(config: EngineConfig, code: string): Prom
     fid_pw_data_incu_yn: "Y",
   });
   const res = await fetch(
-    `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice?${params}`,
+    `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice?${params}`,
     { headers: headers(config, KIS_TR.MINUTE_CHART) },
   );
   if (!res.ok) return [];
@@ -204,7 +204,7 @@ export async function getOpenBuyOrders(config: KISCreds): Promise<OpenOrder[]> {
       PRDT_TYPE_CD: "300", SLL_BUY_DVSN_CD: "02",  // 02=매수
     });
     const res = await fetch(
-      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl?${params}`,
+      `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl?${params}`,
       { headers: headers(config, KIS_TR.OPEN_ORDERS) },
     );
     if (!res.ok) return [];
@@ -225,7 +225,7 @@ export async function cancelOpenBuyOrders(config: KISCreds): Promise<{ cancelled
     const rmn = Number(ord.rmn_qty || 0);
     if (rmn <= 0) continue;
     try {
-      const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/trading/order-rvsecncl`, {
+      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-rvsecncl`, {
         method: "POST", headers: headers(config, KIS_TR.CANCEL),
         body: JSON.stringify({
           CANO: cano, ACNT_PRDT_CD: acntPrdtCd,

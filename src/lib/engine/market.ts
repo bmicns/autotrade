@@ -1,5 +1,5 @@
 // ─── 시장/투자자 동향 함수 ───────────────────────
-import { KIS_VTS_BASE, KIS_TR } from "@/lib/constants";
+import { KIS_API_BASE, KIS_TR } from "@/lib/constants";
 import { type EngineConfig, type MarketTrend, type InvestorTrend } from "./types";
 import { headers } from "./kis";
 import { MARKET_BONUS_STRONG, MARKET_BONUS_MILD, MARKET_PENALTY_MILD, MARKET_PENALTY_STRONG, INVESTOR_BONUS_BOTH, INVESTOR_BONUS_ORGN, INVESTOR_BONUS_FRGN, INVESTOR_PENALTY_BOTH, INVESTOR_PENALTY_ORGN, INVESTOR_PENALTY_FRGN } from "@/lib/engine/constants";
@@ -11,7 +11,7 @@ export async function getMarketTrend(config: EngineConfig): Promise<MarketTrend>
     const fetchIndex = async (iscd: string) => {
       const params = new URLSearchParams({ fid_cond_mrkt_div_code: "U", fid_input_iscd: iscd });
       const res = await fetch(
-        `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-price?${params}`,
+        `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-price?${params}`,
         { headers: headers(config, "FHPUP02100000") },
       );
       if (!res.ok) return 0;
@@ -60,7 +60,7 @@ export async function getInvestorTrend(config: EngineConfig, code: string): Prom
       fid_input_date_2: end,
     });
     const res = await fetch(
-      `${KIS_VTS_BASE}/uapi/domestic-stock/v1/quotations/inquire-investor?${params}`,
+      `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-investor?${params}`,
       { headers: headers(config, KIS_TR.INVESTOR_TREND) },
     );
     if (!res.ok) return fallback;
@@ -134,7 +134,7 @@ export async function scanInstitutionalBuys(
         fid_input_date_1: "",
       });
       const res = await fetch(
-        `${KIS_VTS_BASE}/uapi/domestic-stock/v1/ranking/investor?${params}`,
+        `${KIS_API_BASE}/uapi/domestic-stock/v1/ranking/investor?${params}`,
         { headers: headers(config, KIS_TR.INST_RANKING) },
       );
       if (!res.ok) continue;
@@ -172,7 +172,7 @@ export async function scanSurgeStocks(config: EngineConfig): Promise<string[]> {
         fid_div_cls_code: "0", fid_trgt_cls_code: "0", fid_trgt_exls_cls_code: "0",
         fid_input_price_1: "", fid_input_price_2: "", fid_vol_cnt: "", fid_input_date_1: "",
       });
-      const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`, {
+      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`, {
         headers: headers(config, "FHPST01700000"),
       });
       if (res.ok) {
@@ -193,7 +193,7 @@ export async function scanSurgeStocks(config: EngineConfig): Promise<string[]> {
         fid_div_cls_code: "0", fid_trgt_cls_code: "0", fid_trgt_exls_cls_code: "0",
         fid_input_price_1: "", fid_input_price_2: "", fid_vol_cnt: "", fid_input_date_1: "",
       });
-      const res = await fetch(`${KIS_VTS_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`, {
+      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`, {
         headers: headers(config, "FHPST01700000"),
       });
       if (res.ok) {

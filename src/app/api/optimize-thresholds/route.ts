@@ -85,7 +85,7 @@ function gridSearch(
 }
 
 // GET /api/optimize-thresholds
-// 인증 불필요 — 읽기 전용, proxy.ts 가 /api/* 전체를 보호함
+// 인증 불필요 — 읽기 전용, middleware.ts 가 /api/* 전체를 보호함
 export async function GET() {
   const { data, error } = await supabase
     .from("trade_memory")

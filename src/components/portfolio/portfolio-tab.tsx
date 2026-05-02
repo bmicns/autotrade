@@ -7,6 +7,8 @@ import { Sparkline } from "@/components/ui/sparkline";
 import { Donut } from "@/components/ui/donut";
 import { PortfolioSnapshot } from "@/components/portfolio/portfolio-snapshot";
 
+const INITIAL_NOW_MS = Date.now();
+
 interface PositionInfo {
   stock_code: string;
   entry_date: string;
@@ -39,7 +41,7 @@ export function PortfolioTab() {
   function calcHoldInfo(code: string): { holdDays: number; dday: number } | null {
     const entryDate = positionMap.get(code);
     if (!entryDate) return null;
-    const holdDays = Math.max(1, Math.ceil((Date.now() - new Date(entryDate).getTime()) / 86400000));
+    const holdDays = Math.max(1, Math.ceil((INITIAL_NOW_MS - new Date(entryDate).getTime()) / 86400000));
     return { holdDays, dday: MAX_HOLD_DAYS - holdDays };
   }
 

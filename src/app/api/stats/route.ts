@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 import { analyzePerformance, type Position } from "@/lib/analytics";
 
@@ -49,6 +49,7 @@ async function buildPositionsFromEngineRuns(dateFilter: string | null): Promise<
         pnl_percent: pnlPct,
         hold_days: null,
         status: "closed",
+        strategy_key: null,
       });
     }
   }
@@ -57,6 +58,9 @@ async function buildPositionsFromEngineRuns(dateFilter: string | null): Promise<
 }
 
 export async function GET(req: NextRequest) {
+  const supabaseError = getSupabaseConfigError();
+  if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
   const period = req.nextUrl.searchParams.get("period") || "all";
 
   let dateFilter: string | null = null;
@@ -91,6 +95,7 @@ export async function GET(req: NextRequest) {
       pnl_percent: row.pnl_percent ? Number(row.pnl_percent) : null,
       hold_days: row.hold_days ? Number(row.hold_days) : null,
       status: (row.status as string) || "open",
+      strategy_key: ((row.entry_signal as { strategyKey?: string } | null)?.strategyKey) || null,
     }));
 
     // positions가 비어있으면 engine_runs에서 보완

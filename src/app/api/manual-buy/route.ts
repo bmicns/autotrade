@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 
 const MAX_QTY = 10_000;
@@ -11,6 +11,9 @@ interface ManualBuyItem {
 
 export async function POST(req: NextRequest) {
   try {
+    const supabaseError = getSupabaseConfigError();
+    if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+
     const { items } = await req.json() as { items: ManualBuyItem[] };
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: "items required" }, { status: 400 });

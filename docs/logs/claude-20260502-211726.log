@@ -1,0 +1,31 @@
+`docs/03-analysis/nexio.analysis.md` 작성 완료했습니다.
+
+---
+
+## 분석 결과 요약
+
+**종합 일치율: 91%** — 설계서 명시 14개 파일 전부 구현, 치명적 결함 없음
+
+### Gap 2건
+
+| # | 우선순위 | 내용 |
+|---|:--------:|------|
+| G1 | **P1** | `store.ts` Health Polling 첫 실행이 60초 후 — `setInterval` 등록 직후 `poll()` 1회 즉시 호출 1줄 추가로 해결 |
+| G2 | P2 | 설계서 문구 혼동 (`signal-tab.tsx`의 `useStockSearch 적용` 문구 → 실제로는 관심종목 기능 자체가 이동됨) |
+
+### 절대규칙 체크
+
+```
+1. 500줄 제한   ✅  최대 458줄 (store.ts)
+2. 단일 책임    ✅  watchlist-section의 usePendingSignals 의존은 기능 연관으로 허용
+3. 서버 검증    ✅  비밀키 알림 미포함 확인, 미들웨어 인증 전체 적용
+4. 성능         ✅  중복 인터벌 방지, debounce 300ms 구현
+5. 폴더 구조    ✅  hooks/components/api 모두 올바른 위치
+```
+
+**P1 수정이 필요한 코드 (`store.ts`):**
+```typescript
+// startHealthPolling 내부에 이 1줄 추가
+poll(); // 즉시 1회 실행
+healthPollHandle = setInterval(poll, 60_000);
+```
