@@ -146,7 +146,7 @@ export async function GET() {
   } finally {
     // 9. 락 해제 (정상 완료 / 오류 모두)
     const releaseTime = new Date().toISOString();
-    await supabase.from("app_config").upsert({ key: "engine_lock", value: null, updated_at: releaseTime }).catch(() => {});
+    try { await supabase.from("app_config").upsert({ key: "engine_lock", value: null, updated_at: releaseTime }); } catch { /* ignore */ }
   }
 }
 
