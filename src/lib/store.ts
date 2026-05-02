@@ -278,13 +278,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  stopHealthPolling: () => {
-    if (healthPollHandle !== null) {
-      clearInterval(healthPollHandle);
-      healthPollHandle = null;
-    }
-  },
-
   pendingCount: 0,
   fetchPendingCount: async () => {
     try {
