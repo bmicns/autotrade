@@ -1,216 +1,222 @@
-# NEXIO v6.1 설계-구현 GAP 분석 보고서
+# NEXIO 신뢰 시스템 — 설계·구현 GAP 분석 (v7.1)
 
-> 설계서: `docs/02-design/features/nexio.design.md`
-> 분석일: 2026-05-02
-> 분석 범위: Phase 1~4 전체 구현 완료 기준
+> 기준 설계서: `docs/02-design/features/nexio.design.md` (v7.1)
+> 분석 일자: 2026-05-02
+> 분석 범위: P0~P2 전체 구현 (config-validator, retry, balance, price, engine, db, client, playwright)
 
 ---
 
 ## 1. Match Rate (일치율)
 
-| 항목 | 점수 |
-|------|:----:|
-| 파일 구현 완성도 | 100% (14/14 파일) |
-| 설계 스펙 일치도 | 91% |
-| 보안 요건 준수 | 100% |
-| 절대규칙 준수 | 88% |
-| **종합** | **91%** |
+| 파일 / 모듈 | 일치율 | 비고 |
+|------------|--------|------|
+| `src/lib/config-validator.ts` | **100%** | 설계 완전 반영 |
+| `src/lib/engine/retry.ts` | **97%** | `maxDelayMs` 인터페이스 옵셔널 여부 미세 차이 |
+| `src/app/api/kis/balance/route.ts` | **100%** | 설계 완전 반영 |
+| `src/app/api/kis/price/route.ts` | **93%** | 500 에러 응답에 내부 e.message 노출 |
+| `src/app/api/engine/route.ts` | **90%** | 중복 로직(getEngineSkipReason 2회, app_config 2회 조회) |
+| `src/lib/engine/db.ts` | **100%** | `cleanupStalePendingOrders` 설계 완전 반영 |
+| `src/lib/kis/client.ts` | **100%** | GET→POST 전환, params() 헬퍼 제거 완료 |
+| `playwright.config.ts` | **100%** | 설계 초과 구현 (global.setup.ts 추가) |
+| `tests/core.spec.ts` | **100%** | TC-01/02/03 모두 구현 |
+
+### **종합 Match Rate: 97%**
 
 ---
 
 ## 2. Gap 목록
 
-### G1 — [P1] store.ts Health Polling 첫 실행 지연
+### GAP-01 — `retry.ts` 인터페이스 옵셔널 불일치 [심각도: 낮음]
 
-| 항목 | 내용 |
-|------|------|
-| 설계 의도 | `hydrate()` 호출 시 KIS 설정 있으면 즉시 상태 확인 시작 |
-| 실제 구현 | `startHealthPolling()` 자동 호출은 구현됐으나 첫 `poll()` 실행이 60초 후 |
-| 영향 | 앱 시작 직후 `kisHealthLastChecked` / `kisLatencyMs` 가 `null` 로 60초간 유지됨 |
-| 위치 | `src/lib/store.ts` — `startHealthPolling` 함수 내 `setInterval` 등록 부분 |
+| 항목 | 설계 | 구현 |
+|------|------|------|
+| `maxDelayMs` 타입 | `maxDelayMs?: number` (optional) | `maxDelayMs: number` (required) |
 
-**수정 방법:**
+**영향:** 함수 내부에서 `?? 10000` 기본값을 적용하므로 런타임 동작은 동일. 타입 레벨에서만 차이.
+**조치 필요 여부:** 없음 (기능 동일, 타입 정의는 오히려 더 명시적).
+
+---
+
+### GAP-02 — `price/route.ts` 500 에러 응답에 내부 메시지 노출 [심각도: 중간]
+
+| 항목 | 설계 | 구현 |
+|------|------|------|
+| 500 응답 바디 | `{ "error": "시세 조회 실패" }` | `{ "error": e.message }` (실제 에러 메시지 포함) |
+
+**위치:** `src/app/api/kis/price/route.ts:22`
 ```typescript
-// 현재 (첫 poll이 60초 후에야 실행)
-startHealthPolling: () => {
-  if (healthPollHandle !== null) return;
-  const poll = async () => { ... };
-  healthPollHandle = setInterval(poll, 60_000);
-},
+// 현재 구현 (설계와 불일치)
+const msg = e instanceof Error ? e.message : "시세 조회 실패";
+return NextResponse.json({ error: msg }, { status: 500 });
+```
 
-// 권장 (즉시 1회 실행 후 60초 간격 폴링)
-startHealthPolling: () => {
-  if (healthPollHandle !== null) return;
-  const poll = async () => { ... };
-  poll(); // 즉시 1회 실행
-  healthPollHandle = setInterval(poll, 60_000);
-},
+**영향:** 클라이언트에 KIS API 내부 에러 메시지(네트워크 주소, 상세 코드 등)가 노출될 수 있음.
+`balance/route.ts`는 설계대로 `"잔고 조회 실패"` 고정 메시지 사용 — 형제 파일 간 일관성 불일치.
+
+**권장 수정:**
+```typescript
+// 수정 후
+console.error("[price] 시세 조회 오류:", e);
+return NextResponse.json({ error: "시세 조회 실패" }, { status: 500 });
 ```
 
 ---
 
-### G2 — [P2] 설계서 문구 혼동 가능성
+### GAP-03 — `engine/route.ts` 중복 로직 [심각도: 낮음]
 
-| 항목 | 내용 |
-|------|------|
-| 설계서 위치 | `docs/02-design/features/nexio.design.md` — Phase 4, 항목 13 |
-| 문구 | `signal-tab.tsx`: "useStockSearch 훅 적용 (직접 fetch 제거)" |
-| 실제 상황 | 관심종목 기능 자체가 signal-tab에서 제거되어 useStockSearch 자체가 불필요해짐 |
-| 평가 | 실질적 Gap 아님 — 다만 향후 설계서 리뷰 시 혼동 유발 가능 |
-| 권장 | 설계서 문구를 "직접 fetch 제거 (useStockSearch는 watchlist-section으로 이동)" 로 업데이트 |
+**a) `getEngineSkipReason` 이중 호출**
+
+| 호출 위치 | 설명 |
+|----------|------|
+| `GET()` 핸들러 6단계 (`route.ts:119`) | 락 획득 후 장 휴장 체크 |
+| `runEngine()` 내부 (`route.ts:297`) | 엔진 실행부 재체크 (레거시 잔존) |
+
+**b) `app_config` 이중 조회**
+
+| 조회 위치 | 설명 |
+|----------|------|
+| `GET()` 핸들러 (`route.ts:117`) | skipReason 판단용 |
+| `runEngine()` 내부 (`route.ts:294`) | applyAppConfig용 |
+
+**영향:** 엔진 실행마다 Supabase SELECT가 2회 추가 발생.
+**원인:** `runEngine()`이 독립 실행 가능한 레거시 구조를 유지하면서 `GET()`에 신규 검증 레이어가 추가됨.
+**조치 필요 여부:** 기능 오류 없음. 추후 리팩터링 시 `cfgMap`을 `GET()`에서 생성해 `runEngine()`에 인자로 전달하면 제거 가능.
 
 ---
 
-### G3 — [참고] /api/kis/health 미들웨어 인증 확인
+### GAP-04 — `price/route.ts` KIS 에러 알림 없음 [심각도: 낮음 / 설계 범위 외]
 
-| 항목 | 내용 |
-|------|------|
-| 설계 | `middleware 세션 검증 적용 (기존 패턴 동일)` 명시 |
-| 실제 | 글로벌 `middleware.ts` 가 `/api/kis/health` 포함 모든 `/api/` 경로 커버 중 |
-| 판정 | Gap 아님 — 신규 route.ts에 인증 코드 없어도 미들웨어에서 처리됨 |
-| 확인 | `middleware.ts` matcher: `/((?!_next/static\|...).*)`  — `/api/kis/health` 포함 확인 |
+`balance/route.ts`는 KIS 에러 시 `sendKISApiErrorAlert` 호출 → Telegram 알림.
+`price/route.ts`는 에러 알림 없이 500 반환만.
+
+**평가:** 설계서 §3.1에서 price 에러 알림은 명시적 요구사항이 아님. `balance`(자산 조회)보다 `price`(시세 조회)가 알림 중요도 낮아 의도적 생략으로 판단.
+**조치 필요 여부:** 없음.
+
+---
+
+### GAP-05 — Playwright `global.setup.ts` 설계 미명시 [심각도: 없음 / 긍정적 추가]
+
+설계서는 `playwright.config.ts` + `tests/core.spec.ts` + `storageState 재사용 설정`만 명시.
+구현에서 `tests/global.setup.ts` 추가 — 로그인 후 `.auth/user.json` 저장 플로우 구현.
+
+**평가:** 설계 의도(인증 상태 재사용)를 더 완전하게 구현한 긍정적 초과 구현.
 
 ---
 
 ## 3. 플랫폼 절대규칙 위반 점검
 
-### ① 500줄 제한
+### ① 500줄 초과 파일
 
-| 파일 | 실제 줄 수 | 설계 예상 | 판정 |
-|------|:---------:|:--------:|:----:|
-| `signal-tab.tsx` | 39줄 | ~100줄 | ✅ |
-| `strategy-tab.tsx` | 252줄 | ~290줄 | ✅ |
-| `watchlist-section.tsx` | 135줄 | ~80줄 | ✅ |
-| `notify.ts` | 158줄 | ~175줄 | ✅ |
-| `api/kis/health/route.ts` | 82줄 | ~60줄 | ✅ |
-| `store.ts` | 458줄 | ~450줄 | ✅ |
-| `useStockSearch.ts` | 34줄 | ~40줄 | ✅ |
-| `useThresholdsOptimize.ts` | 30줄 | ~35줄 | ✅ |
-| `usePositions.ts` | 30줄 | — | ✅ |
-| `usePortfolioSnapshot.ts` | 27줄 | — | ✅ |
-| `useNews.ts` | 27줄 | — | ✅ |
+| 파일 | 줄 수 | 판정 |
+|------|------:|------|
+| `src/app/api/engine/route.ts` | 399줄 | ✅ 이내 |
+| `src/lib/engine/db.ts` | 334줄 | ✅ 이내 |
+| `src/lib/kis/client.ts` | 131줄 | ✅ |
+| `src/app/api/kis/balance/route.ts` | 49줄 | ✅ |
+| `src/app/api/kis/price/route.ts` | 25줄 | ✅ |
+| `src/lib/config-validator.ts` | 38줄 | ✅ |
+| `src/lib/engine/retry.ts` | 34줄 | ✅ |
+| `tests/core.spec.ts` | 47줄 | ✅ |
 
-**결론: 모든 파일 500줄 미만 — 위반 없음**
+**위반 없음.**
 
 ---
 
-### ② 단일 책임
+### ② 단일 책임 위반
 
-| 파일 | 책임 | 판정 | 비고 |
-|------|------|:----:|------|
-| `notify.ts` | Telegram 알림 전송 전담 | ✅ | |
-| `useStockSearch.ts` | 종목 검색 로직 전담 | ✅ | |
-| `useThresholdsOptimize.ts` | 임계치 최적화 로직 전담 | ✅ | |
-| `watchlist-section.tsx` | 관심종목 UI 전담 | ⚠️ | `usePendingSignals().dartCodes` 사용 포함 (DART 코드 강조용) |
-| `signal-tab.tsx` | 신호 승인/거절 UI만 | ✅ | |
-| `api/kis/health/route.ts` | KIS 연결 상태 확인 전담 | ✅ | |
+| 파일 | 책임 | 판정 |
+|------|------|------|
+| `config-validator.ts` | 환경변수 검증 전담 | ✅ |
+| `retry.ts` | 재시도/백오프 전담 | ✅ |
+| `balance/route.ts` | 잔고 조회 프록시 전담 | ✅ |
+| `price/route.ts` | 시세 조회 프록시 전담 | ✅ |
+| `client.ts` | 클라이언트→API Route 어댑터 전담 | ✅ |
+| `db.ts` | Supabase DB 헬퍼 전담 | ✅ |
+| `engine/route.ts` | 오케스트레이터 (검증/재시도/정리는 외부 모듈에 위임) | ✅ |
 
-**결론:** `watchlist-section.tsx` 에 `usePendingSignals` 의존이 존재하나, 관심종목과 신호 연결 강조를 위한 기능적 연관이 있어 심각한 위반은 아님. 분리 여부는 판단 유보.
+**위반 없음.**
 
 ---
 
 ### ③ 서버 검증·보안
 
-| 항목 | 확인 위치 | 판정 |
-|------|-----------|:----:|
-| `/api/kis/health` 인증 | `middleware.ts` 전역 커버 | ✅ |
-| `token/route.ts` — 에러 알림 호출 | `token/route.ts:18~35` | ✅ |
-| `balance/route.ts` — 에러 알림 호출 | `balance/route.ts:22~44` | ✅ |
-| `sendKISApiErrorAlert` 내 appKey/appSecret 미포함 | `notify.ts:134~149` | ✅ |
-| KIS 연결 알림 — 접속 정보 미포함 | `notify.ts:152~163` | ✅ |
-| kisMessage 200자 슬라이스 | `notify.ts` + `health/route.ts` | ✅ |
+| 항목 | 구현 현황 | 판정 |
+|------|---------|------|
+| `appSecret` URL 노출 | GET→POST Body 전환 완료 | ✅ |
+| `balance` 바디 필드 검증 | `appKey, appSecret, token, accountNo` 서버 검증 | ✅ |
+| `price` 바디 필드 검증 | `code, appKey, appSecret, token` 서버 검증 | ✅ |
+| 환경변수 에러 응답 | `missing: string[]` 에 키 이름만 포함 (값 미포함) | ✅ |
+| engine 인증 | middleware CRON_ROUTES 처리 | ✅ |
+| 엔진 락 | 서버사이드 app_config 전용 | ✅ |
+| **price 500 에러 메시지** | `e.message` 그대로 응답 — 내부 정보 노출 가능 | ❌ |
 
-**잠재적 기술 부채 (이번 설계 범위 외):**
-- `GET /api/kis/balance` 가 `appKey`, `appSecret`, `token` 을 URL 쿼리 파라미터로 수신
-- 쿼리 파라미터는 서버 액세스 로그에 기록될 수 있음 → POST body 방식으로 개선 권장
+**위반 1건: GAP-02 참조.**
 
 ---
 
-### ④ 성능 (중복 호출·N+1)
+### ④ 성능
 
-| 항목 | 확인 위치 | 판정 |
-|------|-----------|:----:|
-| `startHealthPolling` 중복 인터벌 방지 | `store.ts:5` (모듈 스코프 `healthPollHandle`) | ✅ |
-| `stopHealthPolling` clearInterval 정리 | `store.ts:265~270` | ✅ |
-| `useStockSearch` debounce 300ms | `useStockSearch.ts:20~29` | ✅ |
-| `useThresholdsOptimize` 자동 폴링 없음 | 훅 구현 확인 | ✅ |
-| `fetchKISData` vs `startHealthPolling` 역할 구분 | 구현 확인 | ✅ |
+| 항목 | 구현 현황 | 판정 |
+|------|---------|------|
+| 엔진 중복 실행 | `engine_lock` 5분 TTL 락 구현 | ✅ |
+| `withRetry` 적용 범위 | KIS 토큰 발급에만 적용 | ✅ |
+| `cleanupStalePendingOrders` | 엔진 실행마다 1회 DELETE | ✅ |
+| `fetchBalance/fetchPrice` | GET→POST 전환, 추가 호출 없음 | ✅ |
+| **`app_config` 이중 조회** | GET() + runEngine() 각각 SELECT 1회씩 | ⚠️ 경미 |
+| **`getEngineSkipReason` 이중 호출** | GET() + runEngine() 각각 호출 | ⚠️ 경미 |
 
-**G1 관련:** 첫 poll 지연으로 인한 불필요한 null 상태 노출은 성능보다 UX 문제 — P1 수정 대상
+**위반 없음. 경미한 중복 2건 (GAP-03 참조).**
 
 ---
 
 ### ⑤ 폴더 구조
 
-| 파일 유형 | 위치 | 판정 |
-|---------|------|:----:|
-| 커스텀 훅 5개 | `src/hooks/` | ✅ |
-| 관심종목 컴포넌트 | `src/components/signal/watchlist-section.tsx` | ✅ |
-| Health Check API | `src/app/api/kis/health/route.ts` | ✅ |
-| 알림 함수 확장 | `src/lib/engine/notify.ts` | ✅ |
-| 신규 타입 | `src/lib/engine/types.ts` | ✅ |
+| 파일 | 위치 | 판정 |
+|------|------|------|
+| `config-validator.ts` | `src/lib/` | ✅ |
+| `retry.ts` | `src/lib/engine/` | ✅ |
+| `cleanupStalePendingOrders` | `src/lib/engine/db.ts` (기존 파일 확장) | ✅ |
+| KIS 프록시 라우트 | `src/app/api/kis/` | ✅ |
+| E2E 테스트 | `tests/` (프로젝트 루트) | ✅ |
+| Playwright 설정 | `playwright.config.ts` (루트) | ✅ |
 
-**결론: 폴더 구조 위반 없음**
-
----
-
-## 4. 핵심 구현 확인 체크리스트
-
-| 설계 요건 | 확인 위치 | 상태 |
-|----------|-----------|:----:|
-| `KISHealthStatus` 타입 | `types.ts` | ✅ 완전 일치 |
-| `KISApiErrorContext` 타입 | `types.ts` | ✅ 완전 일치 |
-| `sendKISApiErrorAlert` 시그니처 | `notify.ts` | ✅ 완전 일치 |
-| `sendKISConnectionAlert` 시그니처 | `notify.ts` | ✅ 완전 일치 |
-| Health 응답 형식 (200/400/500) | `health/route.ts` | ✅ 완전 일치 |
-| 상태 변화 감지 → 알림 | `health/route.ts:44~67` | ✅ 설계 일치 |
-| `kisHealthLastChecked` 상태 | `store.ts` | ✅ 설계 일치 |
-| `kisLatencyMs` 상태 | `store.ts` | ✅ 설계 일치 |
-| `startHealthPolling` / `stopHealthPolling` | `store.ts` | ✅ 설계 일치 |
-| `hydrate()` 자동 폴링 시작 | `store.ts` | ✅ 설계 일치 |
-| `useStockSearch` (debounce 300ms) | `hooks/useStockSearch.ts` | ✅ 설계 일치 |
-| `useThresholdsOptimize` (4개 반환값) | `hooks/useThresholdsOptimize.ts` | ✅+ (setOptimizeResult 추가) |
-| `usePositions` (3개 반환값) | `hooks/usePositions.ts` | ✅ 설계 일치 |
-| `usePortfolioSnapshot` | `hooks/usePortfolioSnapshot.ts` | ✅ 설계 일치 |
-| `useNews` | `hooks/useNews.ts` | ✅ 설계 일치 |
-| `watchlist-section.tsx` 독립 섹션 | `components/signal/watchlist-section.tsx` | ✅ 설계 일치 |
-| `signal-tab.tsx` 관심종목 탭 제거 | `components/signal/signal-tab.tsx` | ✅ 설계 일치 |
-| `strategy-tab.tsx` WatchlistSection 추가 | `components/strategy/strategy-tab.tsx` | ✅ 설계 일치 |
+**위반 없음.**
 
 ---
 
-## 5. 종합 의견 및 수정 우선순위
+## 4. 종합 의견 및 수정 우선순위
 
-### 종합 의견
+### 전체 평가
 
-NEXIO v6.1 설계의 핵심 목표인 **운영 안정성 강화(에러 무음 제거)** 와 **코드 구조 개선(훅 추출, 관심종목 분리)** 이 모두 충실히 구현되었습니다.
+설계서 v7.1의 핵심 목표 세 가지가 모두 달성되었다:
 
-설계서가 명시한 14개 신규/수정 파일이 전부 존재하며, KIS 에러 알림 보안 요건(비밀키 미포함)이 notify.ts, token API, balance API 세 군데에서 일관되게 준수되고 있습니다. 중복 인터벌 방지와 debounce도 설계 의도대로 구현되었습니다.
-
-발견된 Gap은 2건으로, 모두 경미합니다. 치명적 결함이나 보안 위반은 없습니다.
+1. **보안 강화 (P0)** — `appSecret` URL 노출 완전 제거. GET→POST 전환과 서버 바디 검증 완료.
+2. **자가진단·복구 (P0/P1)** — 환경변수 조기 검증, 엔진 락(5분 TTL), 고립 주문 정리, withRetry 모두 설계 순서대로 동작.
+3. **핵심 경로 E2E 테스트 (P2)** — TC-01/02/03 구현 완료, 설계 초과로 `global.setup.ts` 추가.
 
 ### 수정 우선순위
 
-| 우선순위 | 항목 | 파일 | 수정 규모 |
-|:--------:|------|------|:--------:|
-| **P0** | 없음 | — | — |
-| **P1** | G1: Health Polling 즉시 실행 추가 | `src/lib/store.ts` | 1줄 추가 |
-| **P2** | G2: 설계서 문구 정확도 개선 | `docs/02-design/features/nexio.design.md` | 1줄 수정 |
-| **P2** | V3: balance API 쿼리파라미터 보안 (다음 리팩토링 시) | `src/app/api/kis/balance/route.ts` | 중간 규모 |
+| 순위 | GAP | 파일 | 수정 내용 | 긴급도 |
+|------|-----|------|---------|--------|
+| **1** | GAP-02 | `src/app/api/kis/price/route.ts:22` | 500 응답에서 `e.message` → `"시세 조회 실패"` 고정, 에러는 `console.error`로 서버 로그 처리 | **보안** |
+| 2 | GAP-03 | `src/app/api/engine/route.ts` | `cfgMap`을 GET()에서 생성 후 runEngine()에 인자로 전달 — 이중 조회·이중 체크 제거 | 성능 (낮음) |
+| — | GAP-01 | `src/lib/engine/retry.ts` | 조치 불필요 (타입 동작 동일) | — |
+| — | GAP-04 | `src/app/api/kis/price/route.ts` | 조치 불필요 (설계 범위 외) | — |
+
+**즉시 조치 필요 항목: GAP-02 (1건) — 2줄 수정**
 
 ---
 
 ```
 ─────────────────────────────────────────────────
-📋 플랫폼 개발 원칙 점검 (nexio.analysis.md 기준)
+📋 플랫폼 개발 원칙 점검 (nexio v7.1 기준)
 ─────────────────────────────────────────────────
-1. 페이지 500줄 제한   : ✅ 준수 (최대 458줄 — store.ts)
-2. 단일 책임           : ✅ 준수 (watchlist-section의 usePendingSignals 의존은 기능적 연관으로 허용)
-3. 서버 검증·보안      : ✅ 준수 (비밀키 알림 미포함 확인, 미들웨어 인증 전체 적용)
-4. 성능 (중복·N+1)     : ✅ 준수 (중복 인터벌 방지, debounce 구현)
-5. 폴더 구조           : ✅ 준수 (hooks/components/api 모두 올바른 위치)
+1. 페이지 500줄 제한   : ✅ 준수 (최대 399줄 — engine/route.ts)
+2. 단일 책임           : ✅ 준수
+3. 서버 검증·보안      : ❌ price/route.ts:22 — 500 에러에 e.message 노출
+4. 성능 (중복·N+1)     : ⚠️ 경미 — app_config 이중 조회 / getEngineSkipReason 이중 호출
+5. 폴더 구조           : ✅ 준수
 ─────────────────────────────────────────────────
-위반 항목: 없음
-수정 권고 (P1): store.ts startHealthPolling 즉시 실행 1줄 추가
+위반 항목: 1건 (GAP-02) — 수정 후 재확인 권고
 ─────────────────────────────────────────────────
 ```

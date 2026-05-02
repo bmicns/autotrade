@@ -1,8 +1,9 @@
 # NEXIO Wiki — 인덱스
 
 > **프로젝트**: NEXIO (AI 자동매매 시스템)
-> **버전**: v6.5.1 (v6.1 운영 안정성 + 코드 구조 개선 계획 반영)
-> **컴파일 날짜**: 2026-05-02
+> **버전**: v7.1 신뢰 시스템 (보안 강화 + 자가복구 + 환경변수 검증 + E2E 테스트 계획 반영)
+> **컴파일 날짜**: 2026-05-02 (2차 갱신)
+> **소스 파일**: 76개 스캔
 > **배포**: https://nexio.vercel.app
 
 ---
@@ -39,13 +40,20 @@ src/
 ├── lib/
 │   ├── engine/
 │   │   ├── types.ts             — EngineConfig, EngineAction, StepContext, MarketTrend 등
-│   │   ├── steps.ts             — STEP 0/1/1.5 (356줄), batchFetch
+│   │   ├── steps.ts             — STEP 0/1/1.5 (356줄)
 │   │   ├── steps-scan.ts        — STEP 2/3 관심종목+급등주 스캔 (295줄)
 │   │   ├── notify.ts            — 텔레그램 알림 (sendTradeAlert, sendDailyReport)
 │   │   ├── db.ts                — DB helper (openPosition, closePosition 등)
 │   │   ├── kis.ts               — KIS API 호출 (limitBuyOrder, cancelOpenBuyOrders 등)
 │   │   ├── filters.ts           — 종목 필터 (DART, 시가총액, 상장일)
-│   │   └── market.ts            — getMarketTrend, getInvestorTrend, scanSurgeStocks
+│   │   ├── market.ts            — getMarketTrend, getInvestorTrend, scanSurgeStocks
+│   │   ├── constants.ts         — 엔진 상수 (END_OF_DAY_TIME, 투자자 보정값 등) [v7.1 신규]
+│   │   ├── intraday.ts          — VWAP/POC 장중 지표 calcVWAP/calcPOC/calcIntradayBonus [v7.1 신규]
+│   │   ├── strategies.ts        — 전략 배분 비율 (watchlist 40%, surge 25%, institutional 35%) [v7.1 신규]
+│   │   ├── market-calendar.ts   — KST 시간 파싱, 공휴일/장중 판단 [v7.1 신규]
+│   │   ├── utils.ts             — batchFetch, getOpeningBonus [v7.1 분리]
+│   │   └── retry.ts             — 지수 백오프 재시도 래퍼 withRetry<T>() [v7.1 신규]
+│   ├── config-validator.ts      — 필수 환경변수 검증 validateRequiredEnv() [v7.1 신규]
 │   ├── learning.ts              — 학습 공개 API (runLearning, loadLatestLearning, applyLearning)
 │   ├── learning-engine.ts       — 학습 내부 구현 (learnWeights, learnAtrMultipliers 등)
 │   ├── supabase/api-client.ts   — 싱글턴 Supabase 클라이언트
@@ -100,10 +108,12 @@ src/
 | `/api/engine-control` | POST | 비상 정지 / 최대 포지션 수 변경 (인증 미설정 — 수정 예정) |
 | `/api/daily-report` | GET | 일일 매매 결과 텔레그램 발송 (CRON_SECRET 필수) |
 | `/api/positions` | GET | 현재 포지션 조회 |
-| `/api/kis/health` | GET | KIS 연결 상태 Health Check (세션 인증, 60초 폴링용) [v6.1 계획] |
+| `/api/kis/health` | GET | KIS 연결 상태 Health Check (세션 인증, 60초 폴링용) |
 | `/api/stock-search` | GET | 종목명/코드 검색 (?q=) |
 | `/api/optimize-thresholds` | GET | 신호 임계치 자동 최적화 계산 |
 | `/api/news` | GET | 주요 경제/시장 뉴스 피드 |
+| `/api/kis/balance` | POST | KIS 잔고 조회 — v7.1 GET→POST 전환 (appSecret body 전달) |
+| `/api/kis/price` | POST | KIS 현재가 조회 — v7.1 GET→POST 전환 (appSecret body 전달) |
 
 ### GitHub Actions 크론 스케줄
 
@@ -117,10 +127,19 @@ src/
 
 ---
 
+## 컨셉 목록
+
+| 컨셉 | 파일 | 설명 |
+|------|------|------|
+| 점진적 파일 분리 | [progressive-file-split.md](concepts/progressive-file-split.md) | 파일이 500줄 한계에 근접하면 역할 단위로 분리하는 반복 패턴 — trading-engine에서 4회 발생 |
+
+---
+
 ## 버전 이력 요약
 
 | 버전 | 날짜 | 주요 변경 |
 |------|------|----------|
+| v7.1 | 2026-05-02 | 신뢰 시스템 완성 계획 반영 — balance/price POST 전환(보안), 엔진 자가복구(중복방지/고립정리/지수백오프), 환경변수 자동 감지, E2E 테스트 설계 |
 | v6.5.1 | 2026-05-02 | v6.1 운영 안정성 계획 반영 (KIS Health Check, notify.ts 알림 강화, 컴포넌트 훅 추출 설계, 운영 런북/리스크 문서 추가) |
 | v5.2.1 | 2026-04-20 | Phase 2: 10종 지표(StochRSI/OBV/이격도), 2단계 익절, 시장급락 차단, 체결확인 루프, 콜드스타트 수정, portfolio_snapshots/pending_orders 테이블 |
 | v5.14.0 | 2026-04-17 | steps.ts 분리, notify.ts(텔레그램), engine-control API, daily-report API, app_config 테이블 |
@@ -128,6 +147,8 @@ src/
 | v5.9.0 | 2026-04-11 | 적응형 학습 엔진 전체 (P1~P6) |
 
 ## Recent Changes
+- 2026-05-02: 6개 토픽 업데이트 + 컨셉 1개 신규 — v7.1 유틸리티 모듈(constants.ts, intraday.ts, strategies.ts, market-calendar.ts, utils.ts, retry.ts), nexio.analysis.md(GAP 분석), sector-limit.design.md(섹터 분산), signal-thresholds.plan.md(동적 임계값), plan-v6.md(v6.0 로드맵) 반영; 컨셉: progressive-file-split
+- 2026-05-02: 6개 토픽 업데이트 — v7.1 nexio.plan.md + nexio.design.md 반영 (balance/price POST 전환, 엔진 자가복구, 환경변수 자동 감지, E2E 테스트, config-validator.ts/retry.ts 신규 모듈, engine_lock 설계, cleanupStalePendingOrders, ConfigValidationResult/RetryOptions 타입 추가)
 - 2026-05-02: 5개 토픽 업데이트 — v6.1 nexio.plan.md + nexio.design.md 반영 (KIS Health Check API, notify.ts 신규 함수 2종, KISHealthStatus/KISApiErrorContext 타입, SignalTab 구조 변경, 훅 추출 계획, silent catch 목록, 운영 런북/리스크 문서화)
 - 2026-04-20: 5개 토픽 업데이트 — 10종 지표(+StochRSI/OBV/이격도), 2단계 익절, 시장급락 차단, 체결확인 루프, 콜드스타트 블렌딩, pending_orders/portfolio_snapshots 테이블 신규
 - 2026-04-17: 3개 토픽 업데이트 — steps.ts/notify.ts 신규, engine-control/daily-report API, app_config 테이블

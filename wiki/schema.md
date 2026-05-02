@@ -134,3 +134,72 @@ export interface KISApiErrorContext {
   timestamp: string;        // ISO 8601
 }
 ```
+
+---
+
+## ConfigValidationResult (v7.1 신규, src/lib/config-validator.ts)
+
+`validateRequiredEnv()` 반환 타입. 엔진 진입부에서 필수 환경변수 누락 여부를 판단한다.
+
+```typescript
+interface ConfigValidationResult {
+  ok: boolean;        // required 그룹 전부 통과 시 true
+  missing: string[];  // 누락된 필수 환경변수 이름 목록 (값 아님)
+  warnings: string[]; // warn 그룹 누락 (오류 아님, 로그만)
+}
+```
+
+**필수(REQUIRED) 그룹**: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `CRON_SECRET`, `ADMIN_SECRET`, `ADMIN_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+
+**경고(WARN) 그룹**: `KIS_APP_KEY`, `KIS_APP_SECRET`, `KIS_ACCOUNT_NO` (DB `kis_config`로 대체 가능)
+
+---
+
+## RetryOptions (v7.1 신규, src/lib/engine/retry.ts)
+
+`withRetry<T>()` 함수의 옵션 타입. KIS 토큰 발급 등 핵심 네트워크 호출에 적용.
+
+```typescript
+interface RetryOptions {
+  maxAttempts: number;   // default: 3
+  baseDelayMs: number;   // default: 1000 (ms)
+  maxDelayMs?: number;   // default: 10000 (ms)
+}
+
+// 백오프 계산식
+// delay = min(baseDelayMs × 2^(attempt - 1), maxDelayMs)
+// attempt 1 → 즉시, attempt 2 → 1초, attempt 3 → 2초
+```
+
+---
+
+## Wiki 구조
+
+### 토픽
+
+| 슬러그 | 파일 | 설명 |
+|--------|------|------|
+| platform-overview | topics/platform-overview.md | NEXIO 전체 기술 스택, 기능 영역, 버전 로드맵 |
+| trading-engine | topics/trading-engine.md | 엔진 오케스트레이션, STEP 0~3, 유틸리티 모듈 14개+ |
+| signal-system | topics/signal-system.md | 10종 기술 지표, 레짐 감지, 보정 3종, 동적 임계값 계획 |
+| adaptive-engine | topics/adaptive-engine.md | 학습 파이프라인, 신뢰도 체계, 가중치/ATR 배수 최적화 |
+| order-management | topics/order-management.md | 지정가 매수, 포지션 청산, 섹터 필터 (v6.2 설계) |
+| database | topics/database.md | 11개 테이블 전체 스키마, app_config 키 목록, RLS |
+| deployment | topics/deployment.md | GitHub Actions 크론, Vercel observer, 운영 런북 |
+
+### 컨셉
+
+| 슬러그 | 파일 | 설명 |
+|--------|------|------|
+| progressive-file-split | concepts/progressive-file-split.md | 파일이 500줄 한계에 근접하면 역할 단위로 분리하는 반복 패턴 |
+
+### 진화 로그
+
+| 날짜 | 내용 |
+|------|------|
+| 2026-05-02 | trading-engine, signal-system, database, platform-overview, order-management, deployment 업데이트 — 신규 유틸리티 모듈(constants.ts, intraday.ts, strategies.ts, market-calendar.ts, utils.ts, retry.ts), sector-limit.design.md, signal-thresholds.plan.md, nexio.analysis.md, plan-v6.md 반영; 컨셉 신규: progressive-file-split |
+| 2026-05-02 | platform-overview, trading-engine, signal-system, order-management, deployment, database 업데이트 — v7.1 신뢰 시스템 (balance/price POST 전환, 엔진 자가복구, 환경변수 자동 감지, E2E 테스트 계획) |
+| 2026-05-02 | platform-overview, trading-engine, signal-system, order-management, deployment 업데이트 — v6.1 운영 안정성 (KIS Health Check, notify.ts 강화, 훅 추출 계획) |
+| 2026-04-17 | trading-engine, deployment, database 업데이트 — steps.ts 분리, notify.ts, app_config 테이블, engine-control API |
+| 2026-04-17 | 6개 토픽 전면 재컴파일 — lib/engine 모듈화, GitHub Actions 크론, 보안/성능 개선 |
+| 2026-04-12 | 초기 컴파일 — 7개 토픽 생성 |

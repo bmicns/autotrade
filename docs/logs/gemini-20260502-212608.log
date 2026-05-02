@@ -1,0 +1,36 @@
+YOLO mode is enabled. All tool calls will be automatically approved.
+Loaded cached credentials.
+YOLO mode is enabled. All tool calls will be automatically approved.
+I will start by exploring the codebase to understand the current implementation of the balance API and engine management, searching for "NEXIO" related files and examining the `src/lib/kis/` and `src/app/api/kis/` directories.
+I will now search for the balance API in `src/app/api/kis/`, examine the engine logic in `src/lib/engine/`, and check `package.json` for any testing tools.
+I will now examine the contents of `src/app/api/kis/balance`.
+Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 5s.. Retrying after 6856ms...
+I will now read `src/app/api/kis/balance/route.ts` to understand its current implementation.
+Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 6s.. Retrying after 7247ms...
+I've identified that the current `GET` implementation exposes credentials in `searchParams`, which needs to be changed to `POST`. I'll now examine the engine logic by listing the contents of `src/lib/engine`.
+Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 5s.. Retrying after 6150ms...
+I'll also check `src/app/api/engine/route.ts`, since it likely triggers the engine.
+Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 5s.. Retrying after 6379ms...
+It's a large file, so I'll read it to understand engine execution and check for any existing recovery logic.
+Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 6s.. Retrying after 7676ms...
+The engine code has basic error handling but lacks self-recovery, and while `resolveKisCredentials` checks for KIS credentials, there's no comprehensive environment variable check. I'll now check `package.json` for any testing tools.
+Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 6s.. Retrying after 6717ms...
+`package.json` lacks testing tools, so I'll suggest adding Playwright for E2E tests as requested, while also checking for hidden test files and examining `scripts/check-engine.cjs`.
+`check-engine.cjs` is just a local script, not a full E2E suite. I've analyzed the requirements: I'll transition the balance API to `POST`, implement engine self-recovery using Supabase state, add a central environment variable validator, and introduce Playwright for core E2E tests. I'll now locate the balance API's frontend consumers.
+Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 2s.. Retrying after 5182ms...
+`src/lib/kis/client.ts` uses it, so I'll examine that file.
+Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 4s.. Retrying after 5908ms...
+`fetchBalance` and `fetchPrice` use `GET` and expose `appSecret`, so I'll recommend moving both to `POST` for security. I'll also create `src/lib/config-validator.ts` later. For engine self-recovery, I'll examine `src/lib/engine/db.ts` to understand the current logging.
+Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 5s.. Retrying after 5966ms...
+`logEngineRun` exists, but true self-recovery requires handling crashed or hung runs, possibly via a state machine or idempotent tasks. For "NEXIO Trust System v7.1," I'll transition the balance (and price) APIs to `POST`, implement engine self-recovery through liveness checks and state cleanup, add a configuration validator for environment variables with Telegram alerts, and introduce Playwright E2E tests for core paths like login and the dashboard. I'll now verify the project's current environment variables.
+Attempt 1 failed: You have exhausted your capacity on this model. Your quota will reset after 2s.. Retrying after 5753ms...
+I've gathered all necessary information and will now draft the plan in `/Users/watchers/Desktop/autotrade/docs/01-plan/features/nexio.plan.md`.
+NEXIO 신뢰 시스템 완성(v7.1) 기획을 완료하여 `docs/01-plan/features/nexio.plan.md`에 작성했습니다.
+
+### 기획 주요 내용
+1.  **balance API POST 전환**: `appSecret` 등 민감 정보가 URL에 노출되는 문제를 해결하기 위해 기존 `GET` 방식을 `POST`와 JSON 바디 방식으로 변경합니다.
+2.  **엔진 자가복구 로직**: `engine_runs` 기록을 통한 중복 실행 방지(Liveness Check), 일정 시간이 지난 `pending_orders` 자동 정리(Stale State Cleanup), 핵심 API 호출에 대한 재시도(Retry Wrapper) 로직을 도입합니다.
+3.  **환경변수 누락 자동 감지**: `config-validator.ts`를 신규 생성하여 엔진 가동 직후 필수 변수(SUPABASE, KIS, TELEGRAM 등)를 검증하고, 누락 시 텔레그램 알림을 발송합니다.
+4.  **핵심 경로 E2E 테스트**: Playwright를 도입하여 로그인, 대시보드 데이터 렌더링, 설정 페이지 정상 작동 여부를 검증하는 `tests/core.spec.ts`를 구축합니다.
+
+작성된 기획서는 `docs/01-plan/features/nexio.plan.md`에서 확인하실 수 있습니다.

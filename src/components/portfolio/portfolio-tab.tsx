@@ -84,7 +84,7 @@ export function PortfolioTab() {
   const stockRatio = total > 0 ? Math.round((totalStock / total) * 100) : 0;
 
   return (
-    <div>
+    <div data-testid="portfolio">
       {/* 요약 */}
       <div style={{ padding: 20, display: "flex", gap: 20, alignItems: "center", borderBottom: `1px solid ${COLORS.line}` }}>
         <div style={{ position: "relative", flexShrink: 0 }}>

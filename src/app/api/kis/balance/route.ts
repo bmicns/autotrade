@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getBalance, KISError } from "@/lib/kis/api";
 import { sendKISApiErrorAlert } from "@/lib/engine/notify";
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const timestamp = new Date().toISOString();
   try {
-    const { searchParams } = req.nextUrl;
-    const appKey = searchParams.get("appKey");
-    const appSecret = searchParams.get("appSecret");
-    const token = searchParams.get("token");
-    const accountNo = searchParams.get("accountNo");
+    const body = await req.json() as {
+      appKey?: string;
+      appSecret?: string;
+      token?: string;
+      accountNo?: string;
+    };
+    const { appKey, appSecret, token, accountNo } = body;
 
     if (!appKey || !appSecret || !token || !accountNo) {
       return NextResponse.json({ error: "appKey, appSecret, token, accountNo 필수" }, { status: 400 });

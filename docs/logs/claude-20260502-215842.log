@@ -1,0 +1,43 @@
+wiki 컴파일 완료. 분석 결과를 요약합니다.
+
+---
+
+## 분석 완료 (`docs/03-analysis/nexio.analysis.md`)
+
+### 종합 Match Rate: **97%**
+
+| 파일 | 일치율 |
+|------|--------|
+| `config-validator.ts` | 100% |
+| `retry.ts` | 97% |
+| `balance/route.ts` | 100% |
+| `price/route.ts` | 93% |
+| `engine/route.ts` | 90% |
+| `db.ts` | 100% |
+| `client.ts` | 100% |
+| `playwright.config.ts` + 테스트 | 100% |
+
+---
+
+### 발견된 Gap (4건)
+
+| # | 심각도 | 위치 | 내용 |
+|---|--------|------|------|
+| **GAP-02** | **중간 (보안)** | `price/route.ts:22` | 500 에러에 `e.message` 그대로 응답 → 내부 정보 노출. `balance/route.ts`와 불일치. |
+| GAP-03 | 낮음 (성능) | `engine/route.ts` | `getEngineSkipReason` + `app_config` 이중 조회 (기능 오류 없음) |
+| GAP-01 | 없음 | `retry.ts` | `maxDelayMs` 인터페이스 옵셔널 여부만 다름, 동작 동일 |
+| GAP-05 | 긍정적 | `tests/global.setup.ts` | 설계 미명시 파일 추가 — 더 견고한 구현 |
+
+---
+
+### 플랫폼 절대규칙 위반
+
+```
+1. 500줄 제한   : ✅ (최대 399줄)
+2. 단일 책임    : ✅
+3. 서버 검증·보안: ❌ price/route.ts:22 — e.message 노출
+4. 성능         : ⚠️ 경미 (이중 조회)
+5. 폴더 구조    : ✅
+```
+
+**즉시 수정 권고**: `src/app/api/kis/price/route.ts:22` — `e.message` → `"시세 조회 실패"` 고정 (2줄 수정)

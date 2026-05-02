@@ -34,21 +34,20 @@ interface BalanceResult {
   cashBalance: number;
 }
 
-function params(config: KISConfig) {
-  return new URLSearchParams({
-    appKey: config.appKey,
-    appSecret: config.appSecret,
-    token: config.token || "",
-    accountNo: config.accountNo,
-  });
-}
-
 // 현재가 조회
 export async function fetchPrice(config: KISConfig, stockCode: string): Promise<StockPrice | null> {
   try {
-    const p = params(config);
-    p.set("code", stockCode);
-    const res = await fetch(`/api/kis/price?${p}`);
+    const res = await fetch("/api/kis/price", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: stockCode,
+        appKey: config.appKey,
+        appSecret: config.appSecret,
+        token: config.token || "",
+        accountNo: config.accountNo,
+      }),
+    });
     if (!res.ok) return null;
     const data = await res.json();
     const o = data.output;
@@ -86,7 +85,16 @@ export async function fetchPrices(config: KISConfig, codes: string[]): Promise<M
 // 잔고 조회
 export async function fetchBalance(config: KISConfig): Promise<BalanceResult | null> {
   try {
-    const res = await fetch(`/api/kis/balance?${params(config)}`);
+    const res = await fetch("/api/kis/balance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        appKey: config.appKey,
+        appSecret: config.appSecret,
+        token: config.token || "",
+        accountNo: config.accountNo,
+      }),
+    });
     if (!res.ok) return null;
     const data = await res.json();
 

@@ -324,3 +324,11 @@ export async function deletePendingOrder(orderId: string): Promise<void> {
     await supabase.from("pending_orders").delete().eq("id", orderId);
   } catch { /* ignore */ }
 }
+
+// 30분 이상 경과한 pending_orders 일괄 삭제 (고립 상태 정리)
+export async function cleanupStalePendingOrders(cutoffMinutes = 30): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - cutoffMinutes * 60 * 1000).toISOString();
+    await supabase.from("pending_orders").delete().lt("created_at", cutoff);
+  } catch { /* ignore */ }
+}

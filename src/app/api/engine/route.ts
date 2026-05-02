@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { loadLatestLearning, applyLearning } from "@/lib/learning";
 import { KIS_API_BASE } from "@/lib/constants";
 import { type EngineConfig, type StepContext } from "@/lib/engine/types";
-import { logEngineRun } from "@/lib/engine/db";
+import { logEngineRun, cleanupStalePendingOrders } from "@/lib/engine/db";
 import { supabase } from "@/lib/supabase/api-client";
 import { runStep0, runStep1, runStep15 } from "@/lib/engine/steps";
 import { END_OF_DAY_TIME } from "@/lib/engine/constants";
@@ -12,33 +12,21 @@ import { normalizeStrategyAllocations } from "@/lib/engine/strategies";
 import { getBalance } from "@/lib/engine/kis";
 import { sendDailyReport, sendEngineErrorAlert } from "@/lib/engine/notify";
 import { getKisCredentialCandidates, persistKisConfig, type RuntimeKisConfig } from "@/lib/kis/runtime-config";
+import { validateRequiredEnv } from "@/lib/config-validator";
+import { withRetry } from "@/lib/engine/retry";
 
-async function issueKisToken(appKey: string, appSecret: string, maxRetry = 2): Promise<{ ok: true; token: string } | { ok: false; detail: string }> {
-  let lastDetail = "";
-  for (let attempt = 1; attempt <= maxRetry; attempt++) {
-    try {
-      const tokenRes = await fetch(`${KIS_API_BASE}/oauth2/tokenP`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ grant_type: "client_credentials", appkey: appKey, appsecret: appSecret }),
-      });
-
-      if (tokenRes.ok) {
-        const tokenData = await tokenRes.json();
-        return { ok: true, token: tokenData.access_token as string };
-      }
-
-      const errBody = await tokenRes.text().catch(() => "");
-      lastDetail = `${tokenRes.status} ${errBody.slice(0, 200)}`.trim();
-    } catch (e) {
-      lastDetail = e instanceof Error ? e.message : "네트워크 오류";
-    }
-
-    if (attempt < maxRetry) {
-      await new Promise((r) => setTimeout(r, 3000));
-    }
+async function issueKisToken(appKey: string, appSecret: string): Promise<string> {
+  const tokenRes = await fetch(`${KIS_API_BASE}/oauth2/tokenP`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ grant_type: "client_credentials", appkey: appKey, appsecret: appSecret }),
+  });
+  if (!tokenRes.ok) {
+    const errBody = await tokenRes.text().catch(() => "");
+    throw new Error(`${tokenRes.status} ${errBody.slice(0, 200)}`.trim());
   }
-  return { ok: false, detail: lastDetail };
+  const tokenData = await tokenRes.json();
+  return tokenData.access_token as string;
 }
 
 async function resolveKisCredentials(): Promise<
@@ -52,14 +40,18 @@ async function resolveKisCredentials(): Promise<
 
   const failures: string[] = [];
   for (const candidate of candidates) {
-    const tokenResult = await issueKisToken(candidate.creds.appKey, candidate.creds.appSecret);
-    if (tokenResult.ok) {
+    try {
+      const token = await withRetry(
+        () => issueKisToken(candidate.creds.appKey, candidate.creds.appSecret),
+        { maxAttempts: 3, baseDelayMs: 1000 }
+      );
       if (candidate.source === "env") {
         await persistKisConfig(candidate.creds);
       }
-      return { ok: true, creds: candidate.creds, token: tokenResult.token, source: candidate.source };
+      return { ok: true, creds: candidate.creds, token, source: candidate.source };
+    } catch (e) {
+      failures.push(`${candidate.source}:${e instanceof Error ? e.message : "토큰 오류"}`);
     }
-    failures.push(`${candidate.source}:${tokenResult.detail}`);
   }
 
   return { ok: false, detail: failures.join(" | ") };
@@ -87,35 +79,75 @@ async function cleanupStaleSignals() {
 // ─── Cron GET ───────────────────────────────────
 // 인증은 middleware.ts CRON_ROUTES에서 처리됨
 export async function GET() {
-  await cleanupStaleSignals();
-
-  const { data: appConfigs } = await supabase.from("app_config").select("key, value");
-  const cfgMap = new Map((appConfigs || []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
-  const skipReason = getEngineSkipReason(cfgMap);
-  if (skipReason) {
-    await logEngineRun(0, [{ type: "skipped", code: "", detail: skipReason }], 0, 0);
-    return NextResponse.json({ skipped: true, reason: skipReason });
+  // 1. 환경변수 검증
+  const envCheck = validateRequiredEnv();
+  if (!envCheck.ok) {
+    const errMsg = `환경변수 검증 실패: ${envCheck.missing.join(", ")}`;
+    await sendEngineErrorAlert(errMsg, 0).catch(() => {
+      console.error("[engine] 환경변수 누락 (Telegram 알림 실패):", envCheck.missing);
+    });
+    return NextResponse.json({ error: "환경변수 검증 실패", missing: envCheck.missing }, { status: 500 });
   }
 
-  const resolved = await resolveKisCredentials();
-  if (!resolved.ok) {
-    await logEngineRun(0, [{ type: "token_error", code: "", detail: `KIS 토큰 발급 실패: ${resolved.detail}` }], 0, 0, "토큰 발급 실패");
-    return NextResponse.json({ error: "토큰 발급 실패" }, { status: 500 });
+  // 2. 엔진 락 확인 (5분 TTL)
+  const { data: lockRow } = await supabase
+    .from("app_config")
+    .select("value")
+    .eq("key", "engine_lock")
+    .maybeSingle();
+  if (lockRow?.value) {
+    const lockTime = new Date(lockRow.value as string).getTime();
+    if (Date.now() - lockTime < 5 * 60 * 1000) {
+      return NextResponse.json({ skipped: true, reason: `engine_lock: 이미 실행 중 (since: ${lockRow.value})` });
+    }
   }
 
-  const { data: watchlistData } = await supabase.from("watchlist").select("code").eq("active", true);
-  const watchlist = (watchlistData || []).map((w: { code: string }) => w.code);
+  // 3. 엔진 락 획득
+  const now = new Date().toISOString();
+  await supabase.from("app_config").upsert({ key: "engine_lock", value: now, updated_at: now });
 
-  const config: EngineConfig = {
-    appKey: resolved.creds.appKey,
-    appSecret: resolved.creds.appSecret,
-    accountNo: resolved.creds.accountNo,
-    token: resolved.token,
-    ...DEFAULT_ENGINE_CONFIG,
-    watchlist,
-  };
+  try {
+    // 4. cleanupStaleSignals (기존)
+    await cleanupStaleSignals();
 
-  return runEngine(config);
+    // 5. cleanupStalePendingOrders (신규)
+    await cleanupStalePendingOrders();
+
+    // 6. getEngineSkipReason (기존)
+    const { data: appConfigs } = await supabase.from("app_config").select("key, value");
+    const cfgMap = new Map((appConfigs || []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
+    const skipReason = getEngineSkipReason(cfgMap);
+    if (skipReason) {
+      await logEngineRun(0, [{ type: "skipped", code: "", detail: skipReason }], 0, 0);
+      return NextResponse.json({ skipped: true, reason: skipReason });
+    }
+
+    // 7. resolveKisCredentials (withRetry 적용)
+    const resolved = await resolveKisCredentials();
+    if (!resolved.ok) {
+      await logEngineRun(0, [{ type: "token_error", code: "", detail: `KIS 토큰 발급 실패: ${resolved.detail}` }], 0, 0, "토큰 발급 실패");
+      return NextResponse.json({ error: "토큰 발급 실패" }, { status: 500 });
+    }
+
+    const { data: watchlistData } = await supabase.from("watchlist").select("code").eq("active", true);
+    const watchlist = (watchlistData || []).map((w: { code: string }) => w.code);
+
+    const config: EngineConfig = {
+      appKey: resolved.creds.appKey,
+      appSecret: resolved.creds.appSecret,
+      accountNo: resolved.creds.accountNo,
+      token: resolved.token,
+      ...DEFAULT_ENGINE_CONFIG,
+      watchlist,
+    };
+
+    // 8. 엔진 실행
+    return await runEngine(config);
+  } finally {
+    // 9. 락 해제 (정상 완료 / 오류 모두)
+    const releaseTime = new Date().toISOString();
+    await supabase.from("app_config").upsert({ key: "engine_lock", value: null, updated_at: releaseTime }).catch(() => {});
+  }
 }
 
 // KOSPI 등락률 기준 추세장 판정 임계값 (일평균 변동률 고려: 0.5%면 확실한 상승 모멘텀)

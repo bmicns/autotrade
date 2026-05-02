@@ -1,0 +1,38 @@
+내가 작성·수정한 파일에서 타입 오류 없음 확인. 전체 구현 완료입니다.
+
+---
+
+## 구현 완료 요약
+
+### 신규 생성 파일
+
+| 파일 | 역할 |
+|------|------|
+| `src/hooks/useKISBalance.ts` | `POST /api/kis/balance` 스펙 준수 훅 — 자격증명 Body 전송, 400/401/500 에러 처리 |
+| `src/hooks/useKISPrice.ts` | `POST /api/kis/price` 스펙 준수 훅 — `Promise.allSettled` 다중 종목 병렬 조회 |
+| `src/app/settings/page.tsx` | `/settings` 페이지 라우트 — TC-03 `page.goto("/settings")` 대응 |
+| `tests/global.setup.ts` | Playwright 전역 인증 셋업 — ID+PW 로그인 후 `.auth/user.json` 저장 |
+
+### 수정 파일
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| `src/components/settings/settings-tab.tsx` | App Key 입력에 `name="appKey"` 추가 → TC-03 `input[name="appKey"]` 셀렉터 통과 |
+| `src/components/home/home-tab.tsx` | 히어로 섹션에 `data-testid="balance"` 추가 → TC-02 통과 |
+| `src/components/portfolio/portfolio-tab.tsx` | 루트 div에 `data-testid="portfolio"` 추가 → TC-02 통과 |
+
+---
+
+```
+─────────────────────────────────────────────────
+📋 플랫폼 개발 원칙 점검
+─────────────────────────────────────────────────
+1. 페이지 500줄 제한   : ✅ 준수 (settings/page.tsx 40줄, hooks 각 70줄 이하)
+2. 단일 책임           : ✅ 준수 (훅은 API 호출만, 페이지는 렌더 조합만)
+3. 서버 검증·보안      : ✅ 준수 (자격증명 URL 노출 없음 — POST Body 전용, testid는 민감정보 아님)
+4. 성능 (중복·N+1)     : ✅ 준수 (useKISBalance autoFetch는 appKey 변경 시만 실행, 중복 방지)
+5. 폴더 구조           : ✅ 준수 (hooks/, app/(page route), components/ 지시대로 배치)
+─────────────────────────────────────────────────
+위반 항목: 없음
+─────────────────────────────────────────────────
+```

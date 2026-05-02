@@ -1,6 +1,6 @@
 # Database — DB 스키마 및 구조
 
-[coverage: high -- 4 sources]
+[coverage: high -- 6 sources]
 
 ## Purpose
 
@@ -61,6 +61,13 @@ export const supabase = createClient(
 | pnl_percent | numeric | 손익률 (%) |
 | hold_days | int | 보유 일수 |
 | entry_date | timestamptz | 매수 일시 (자동) |
+| sector | text (NULL) | 업종명 (`bstp_kor_isnm`) — v6.2 추가. 기존 포지션은 NULL. NULL이면 섹터 체크 제외 |
+
+**v6.2 섹터 제한 관련 DB 변경** (`docs/02-design/features/sector-limit.design.md`):
+```sql
+ALTER TABLE positions ADD COLUMN sector TEXT;
+INSERT INTO app_config (key, value) VALUES ('max_per_sector', '2') ON CONFLICT (key) DO NOTHING;
+```
 
 `closePosition()`은 FIFO 방식으로 동작한다. 동일 종목코드의 가장 오래된 `open` 포지션을 조회해 청산 처리한다.
 
@@ -316,6 +323,22 @@ ON CONFLICT (key) DO NOTHING;
 |-----|------|--------|------|
 | `engine_enabled` | boolean JSONB | `true` | `false`이면 `runEngine()`이 즉시 skipped 반환 |
 | `max_positions` | number JSONB | `5` | 동시 보유 가능한 최대 종목 수. 범위 1~20 |
+| `engine_lock` | string JSONB (ISO 8601) or null | null | 중복 실행 방지 락 (v7.1 신규). 락 시각 저장 — 5분 이내 존재 시 skipped 반환 |
+| `max_per_sector` | number JSONB | `2` | 섹터당 최대 보유 종목 수 (v6.2 신규). 0이면 비활성 |
+| `rsi_buy` | number JSONB | `30` | RSI 매수 기준 임계값 (signal-thresholds 계획, v5.2.1) |
+| `rsi_sell` | number JSONB | `70` | RSI 매도 기준 임계값 |
+| `strong_score` | number JSONB | `70` | 즉시 매수(strong) 점수 임계값 |
+| `weak_score` | number JSONB | `40` | 승인 대기(weak) 점수 임계값 |
+| `market_holidays` | array JSONB | `[]` | 추가 공휴일 목록 (`YYYY-MM-DD` 형식) |
+| `morning_start` | string JSONB | `"09:30"` | 엔진 운영 시작 시각 (HH:MM) |
+| `morning_end` | string JSONB | `"15:20"` | 엔진 운영 종료 시각 (HH:MM) |
+
+**engine_lock 락 로직 (v7.1)**:
+- 엔진 시작 시: `engine_lock` 값이 존재하고 설정 시각이 5분 이내 → skip (already running)
+- 락 획득: `engine_lock = new Date().toISOString()` upsert
+- 엔진 종료 시: `engine_lock = null` upsert (try-finally로 정상 완료/에러 모두 해제)
+- 5분 TTL은 비정상 종료(Vercel timeout) 시 자동 만료 보장
+- 스키마 마이그레이션 불필요 — 기존 key-value 패턴 재사용
 
 ## DB Helper Functions
 
@@ -335,6 +358,7 @@ ON CONFLICT (key) DO NOTHING;
 | `getPendingOrders()` | `pending_orders` SELECT 전체, `created_at` 오름차순 |
 | `deletePendingOrder(orderId)` | `pending_orders` DELETE by id |
 | `updatePositionPhase(code, phase)` | `positions` UPDATE — open 포지션의 phase 변경 |
+| `cleanupStalePendingOrders(cutoffMinutes = 30)` | `pending_orders` DELETE — 생성 후 cutoffMinutes 경과한 레코드 일괄 삭제 (v7.1 신규) |
 
 `app_config` 테이블은 `/api/engine-control` 라우트에서 upsert 방식으로 관리한다. GET 요청 시 전체 키를 SELECT, POST 요청 시 변경 키를 `ON CONFLICT (key) DO UPDATE`로 upsert한다. 엔진 진입 시점에는 일괄 SELECT 후 객체로 변환하여 사용한다.
 
@@ -373,3 +397,5 @@ ON CONFLICT (key) DO NOTHING;
 - `docs/04-report/features/adaptive-engine.report.md` (Section 3: P3)
 - `src/lib/engine/db.ts`, `src/lib/supabase/api-client.ts` (운영 중 확인, 2026-04-17)
 - `supabase/migrations/20260417000000_app_config.sql` (app_config 테이블, 2026-04-17)
+- `docs/02-design/features/sector-limit.design.md` (v6.2 — positions.sector 컬럼, app_config.max_per_sector)
+- `docs/01-plan/features/signal-thresholds.plan.md` (v5.2.1 — app_config 임계값 4종 계획)

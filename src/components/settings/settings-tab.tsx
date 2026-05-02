@@ -83,7 +83,7 @@ export function SettingsTab() {
       <div style={{ padding: "0 20px 16px", display: "flex", flexDirection: "column" as const, gap: 12 }}>
         <div>
           <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>App Key</label>
-          <input type="text" value={appKey} onChange={(e) => setAppKey(e.target.value)} placeholder="KIS Developers에서 발급받은 앱키" style={inputStyle} />
+          <input type="text" name="appKey" value={appKey} onChange={(e) => setAppKey(e.target.value)} placeholder="KIS Developers에서 발급받은 앱키" style={inputStyle} />
         </div>
         <div>
           <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>App Secret</label>
