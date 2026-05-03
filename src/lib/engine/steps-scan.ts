@@ -1,4 +1,3 @@
-import { supabase } from "@/lib/supabase/api-client";
 import {
   analyzeSignal, analyzeSignalWithWeights, calcPositionSize,
 } from "@/lib/kis/indicators";
@@ -10,6 +9,8 @@ import { getStrategyBudget } from "@/lib/engine/strategies";
 import { type EngineAction, type StepContext, type MarketTrend } from "@/lib/engine/types";
 import { sendTradeAlert } from "@/lib/engine/notify";
 import { batchFetch, getOpeningBonus } from "@/lib/engine/steps";
+import { joinBonusTags, queuePendingSignal, recordSuccessfulEntry, sleepRateLimit } from "@/lib/engine/entry-flow";
+import { resolveEntryBuyRatio, resolveEntryPhase } from "@/lib/engine/lifecycle";
 // intraday 보너스 제거 — VWAP/POC가 analyzeSignal 핵심 지표로 통합됨
 
 function decideStrength(score: number, strongScore: number, weakScore: number): "strong" | "weak" | "none" {
@@ -66,11 +67,11 @@ export async function runStep2(
     const totalBonus = openingBonus + investor.bonus + marketTrend.bonus;
     const adjustedScore = learnedSignal.totalScore + totalBonus;
     const adjustedStrength = decideStrength(adjustedScore, ctx.strongScore, ctx.weakScore);
-    const bonusTag = [
+    const bonusTag = joinBonusTags([
       openingBonus !== 0 ? `장초반 ${openingBonus > 0 ? "+" : ""}${openingBonus}` : "",
       investor.label ? `[${investor.label}]` : "",
       marketTrend.label ? `[${marketTrend.label}]` : "",
-    ].filter(Boolean).join(" ");
+    ]);
 
     if (adjustedStrength === "strong" && learnedSignal.side === "buy") {
       const priceData = await getPrice(ctx.config, code);
@@ -101,7 +102,7 @@ export async function runStep2(
       }
 
       const existingPos = await getOpenPosition(code);
-      const buyRatio = existingPos?.phase === "initial" ? 1 : 0.5;
+      const buyRatio = resolveEntryBuyRatio(existingPos?.phase);
       const positionSize = calcPositionSize(
         learnedSignal.raw.atr, price,
         ctx.applied.targetRiskAmount, strategyBudget, ctx.applied.atrMultipliers.stop
@@ -110,7 +111,7 @@ export async function runStep2(
       if (qty <= 0) continue;
 
       const result = await limitBuyOrder(ctx.config, code, qty, price);
-      const phase = existingPos ? "full" : "initial";
+      const phase = resolveEntryPhase(existingPos?.phase);
       actions.push({
         type: result.success ? (phase === "initial" ? "split_buy_1" : "split_buy_2") : "buy_failed",
         code, name,
@@ -120,59 +121,45 @@ export async function runStep2(
       });
 
       if (result.success) {
-        await savePendingOrder({
-          stock_code: code,
-          stock_name: name,
-          order_no: result.ordNo ?? "",
-          order_qty: qty,
-          limit_price: result.limitPrice,
-          signal_score: adjustedScore,
-          strategy_key: WATCHLIST_STRATEGY,
-        });
-        await sendTradeAlert({ type: "buy", code, name, qty, price: result.limitPrice, score: adjustedScore, strategyKey: WATCHLIST_STRATEGY, regime: learnedSignal.raw.regime });
-        await recordTradeMemory({
-          code, name,
+        await recordSuccessfulEntry({
+          ctx,
+          code,
+          name,
+          qty,
+          result,
+          adjustedScore,
+          strategyKey: WATCHLIST_STRATEGY,
+          marketTrend,
           baseSignal,
           learnedSignal,
           bonuses: { market: marketTrend.bonus, investor: investor.bonus, snapshot: openingBonus },
-          adjustedScore,
-          weightsSource: ctx.customWeights ? "learned" : "default",
-          positionSize: qty * result.limitPrice,
-          entryPrice: result.limitPrice,
-          stopLossPct: ctx.config.stopLoss,
-          takeProfitPct: ctx.config.takeProfit,
         });
         tradeCount++;
         openPositionCount++;
       }
-      await new Promise((r) => setTimeout(r, 200));
+      await sleepRateLimit();
 
     } else if (adjustedStrength === "weak" && learnedSignal.side === "buy") {
       const priceData = await getPrice(ctx.config, code);
       const name = priceData?.hts_kor_isnm || code;
-      try {
-        await supabase.from("pending_signals").insert({
-          stock_code: code, stock_name: name,
-          signal_score: adjustedScore,
-          signal_comment: `${learnedSignal.comment}${bonusTag}`,
-          signal_data: {
-            indicators: learnedSignal.indicators,
-            raw: learnedSignal.raw,
-            matchCount: learnedSignal.matchCount,
-            openingBonus,
-            institutionalBonus: investor.bonus,
-            strategyKey: WATCHLIST_STRATEGY,
-            allocationPct,
-          },
-          source: "watchlist", status: "pending",
-        });
-      } catch { /* ignore */ }
+      await queuePendingSignal({
+        code,
+        name,
+        score: adjustedScore,
+        comment: `${learnedSignal.comment}${bonusTag}`,
+        signal: learnedSignal,
+        source: "watchlist",
+        strategyKey: WATCHLIST_STRATEGY,
+        allocationPct,
+        openingBonus,
+        institutionalBonus: investor.bonus,
+      });
 
       actions.push({
         type: "pending_approval", code, name,
         detail: `약한 신호 ${adjustedScore}점${bonusTag} → DB 저장, 승인 대기. ${learnedSignal.comment}`,
       });
-      await new Promise((r) => setTimeout(r, 200));
+      await sleepRateLimit();
     } else {
       actions.push({
         type: "signal_skip",
@@ -226,10 +213,10 @@ export async function runStep3(
     const surgeInvestor = sInvestorMap.get(code) ?? { orgn: 0, frgn: 0, bonus: 0, label: "" };
     const surgeAdjustedScore = surgeLearnedSignal.totalScore + surgeInvestor.bonus + marketTrend.bonus;
     const surgeAdjustedStrength = decideStrength(surgeAdjustedScore, ctx.strongScore, ctx.weakScore);
-    const surgeInvestorTag = [
+    const surgeInvestorTag = joinBonusTags([
       surgeInvestor.label ? `[${surgeInvestor.label}]` : "",
       marketTrend.label ? `[${marketTrend.label}]` : "",
-    ].filter(Boolean).join(" ");
+    ]);
 
     if (surgeAdjustedStrength === "strong" && surgeLearnedSignal.side === "buy") {
       const priceData = await getPrice(ctx.config, code);
@@ -275,58 +262,44 @@ export async function runStep3(
       });
 
       if (result.success) {
-        await savePendingOrder({
-          stock_code: code,
-          stock_name: name,
-          order_no: result.ordNo ?? "",
-          order_qty: qty,
-          limit_price: result.limitPrice,
-          signal_score: surgeAdjustedScore,
-          strategy_key: SURGE_STRATEGY,
-        });
-        await sendTradeAlert({ type: "surge_buy", code, name, qty, price: result.limitPrice, score: surgeAdjustedScore, strategyKey: SURGE_STRATEGY, regime: surgeLearnedSignal.raw.regime });
-        await recordTradeMemory({
-          code, name,
+        await recordSuccessfulEntry({
+          ctx,
+          code,
+          name,
+          qty,
+          result,
+          adjustedScore: surgeAdjustedScore,
+          strategyKey: SURGE_STRATEGY,
+          marketTrend,
           baseSignal: surgeBaseSignal,
           learnedSignal: surgeLearnedSignal,
           bonuses: { market: marketTrend.bonus, investor: surgeInvestor.bonus, snapshot: 0 },
-          adjustedScore: surgeAdjustedScore,
-          weightsSource: ctx.customWeights ? "learned" : "default",
-          positionSize: qty * result.limitPrice,
-          entryPrice: result.limitPrice,
-          stopLossPct: ctx.config.stopLoss,
-          takeProfitPct: ctx.config.takeProfit,
         });
         tradeCount++;
         openPositionCount++;
       }
-      await new Promise((r) => setTimeout(r, 200));
+      await sleepRateLimit();
 
     } else if (surgeAdjustedStrength === "weak" && surgeLearnedSignal.side === "buy") {
       const priceData2 = await getPrice(ctx.config, code);
       const surgeName = priceData2?.hts_kor_isnm || code;
-      try {
-        await supabase.from("pending_signals").insert({
-          stock_code: code, stock_name: surgeName,
-          signal_score: surgeAdjustedScore,
-          signal_comment: `${surgeLearnedSignal.comment}${surgeInvestorTag}`,
-          signal_data: {
-            indicators: surgeLearnedSignal.indicators,
-            raw: surgeLearnedSignal.raw,
-            matchCount: surgeLearnedSignal.matchCount,
-            institutionalBonus: surgeInvestor.bonus,
-            strategyKey: SURGE_STRATEGY,
-            allocationPct,
-          },
-          source: "surge", status: "pending",
-        });
-      } catch { /* ignore */ }
+      await queuePendingSignal({
+        code,
+        name: surgeName,
+        score: surgeAdjustedScore,
+        comment: `${surgeLearnedSignal.comment}${surgeInvestorTag}`,
+        signal: surgeLearnedSignal,
+        source: "surge",
+        strategyKey: SURGE_STRATEGY,
+        allocationPct,
+        institutionalBonus: surgeInvestor.bonus,
+      });
 
       actions.push({
         type: "surge_pending", code, name: surgeName,
         detail: `급등주 약한 ${surgeAdjustedScore}점${surgeInvestorTag} → DB 저장, 승인 대기. ${surgeLearnedSignal.comment}`,
       });
-      await new Promise((r) => setTimeout(r, 200));
+      await sleepRateLimit();
     } else {
       actions.push({
         type: "surge_signal_skip",

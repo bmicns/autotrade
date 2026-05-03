@@ -14,8 +14,11 @@ export function useStockSearch(query: string) {
 
   useEffect(() => {
     if (query.length < 1) {
-      setResults([]);
-      return;
+      const resetTimer = setTimeout(() => {
+        setResults([]);
+        setSearching(false);
+      }, 0);
+      return () => clearTimeout(resetTimer);
     }
     const timer = setTimeout(async () => {
       setSearching(true);

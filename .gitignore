@@ -29,3 +29,4 @@ supabase/.temp/
 server/data/
 dist/
 _archive/
+.tmp-tests/

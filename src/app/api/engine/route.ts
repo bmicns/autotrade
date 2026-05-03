@@ -8,12 +8,12 @@ import { runStep0, runStep1, runStep15 } from "@/lib/engine/steps";
 import { END_OF_DAY_TIME } from "@/lib/engine/constants";
 import { getEngineSkipReason, getKstNowParts } from "@/lib/engine/market-calendar";
 import { runStep2, runStep3, runStep4 } from "@/lib/engine/steps-scan";
-import { normalizeStrategyAllocations } from "@/lib/engine/strategies";
 import { getBalance } from "@/lib/engine/kis";
 import { sendDailyReport, sendEngineErrorAlert } from "@/lib/engine/notify";
 import { getKisCredentialCandidates, persistKisConfig, type RuntimeKisConfig } from "@/lib/kis/runtime-config";
 import { validateRequiredEnv } from "@/lib/config-validator";
 import { withRetry } from "@/lib/engine/retry";
+import { applyEngineAppConfig, DEFAULT_ENGINE_CONFIG } from "@/lib/engine/control";
 
 async function issueKisToken(appKey: string, appSecret: string): Promise<string> {
   const tokenRes = await fetch(`${KIS_API_BASE}/oauth2/tokenP`, {
@@ -153,71 +153,6 @@ export async function GET() {
 // KOSPI 등락률 기준 추세장 판정 임계값 (일평균 변동률 고려: 0.5%면 확실한 상승 모멘텀)
 const KOSPI_TRENDING_THRESHOLD = 0.5;
 
-const DEFAULT_ENGINE_CONFIG = {
-  stopLoss: -5,
-  takeProfit: 5,
-  trailingStop: -3,
-  maxPerTrade: 1_000_000,
-  maxDailyTrades: 5,
-  takeProfitRatio: 50,
-  dailyLossLimit: -3,
-  dynamicRisk: true,
-  maxHoldDays: 5,
-} as const;
-
-// ─── app_config → EngineConfig 반영 ────────────────
-function applyAppConfig(
-  config: EngineConfig,
-  cfgMap: Map<string, unknown>
-): {
-  maxPositions: number;
-  maxPerSector: number;
-  strategyAllocations: ReturnType<typeof normalizeStrategyAllocations>;
-} {
-  if (cfgMap.has("stop_loss"))            config.stopLoss            = -Math.abs(Number(cfgMap.get("stop_loss")));
-  if (cfgMap.has("take_profit"))          config.takeProfit          =   Number(cfgMap.get("take_profit"));
-  if (cfgMap.has("take_profit_ratio"))    config.takeProfitRatio     =   Number(cfgMap.get("take_profit_ratio"));
-  if (cfgMap.has("trailing_stop"))        config.trailingStop        = -Math.abs(Number(cfgMap.get("trailing_stop")));
-  if (cfgMap.has("max_amount_per_trade")) config.maxPerTrade         =   Number(cfgMap.get("max_amount_per_trade")) * 10000;
-  if (cfgMap.has("max_trades_per_day"))   config.maxDailyTrades      =   Number(cfgMap.get("max_trades_per_day"));
-  if (cfgMap.has("daily_loss_limit"))     config.dailyLossLimit      = -Math.abs(Number(cfgMap.get("daily_loss_limit")));
-  if (cfgMap.has("max_hold_days"))        config.maxHoldDays         =   Number(cfgMap.get("max_hold_days"));
-  if (cfgMap.has("rsi_buy"))              config.rsiBuy              =   Number(cfgMap.get("rsi_buy"));
-  if (cfgMap.has("rsi_sell"))             config.rsiSell             =   Number(cfgMap.get("rsi_sell"));
-  if (cfgMap.has("strong_score"))         config.strongScore         =   Number(cfgMap.get("strong_score"));
-  if (cfgMap.has("weak_score"))           config.weakScore           =   Number(cfgMap.get("weak_score"));
-  if (cfgMap.has("market_crash_threshold")) config.marketCrashThreshold = Number(cfgMap.get("market_crash_threshold"));
-
-  if (cfgMap.has("trending_rsi_buy") || cfgMap.has("trending_strong_score")) {
-    config.trendingParams = {
-      rsiBuy:      Number(cfgMap.get("trending_rsi_buy")      ?? config.rsiBuy      ?? 30),
-      rsiSell:     Number(cfgMap.get("trending_rsi_sell")     ?? config.rsiSell     ?? 70),
-      strongScore: Number(cfgMap.get("trending_strong_score") ?? config.strongScore ?? 70),
-      weakScore:   Number(cfgMap.get("trending_weak_score")   ?? config.weakScore   ?? 40),
-    };
-  }
-  if (cfgMap.has("ranging_rsi_buy") || cfgMap.has("ranging_strong_score")) {
-    config.rangingParams = {
-      rsiBuy:      Number(cfgMap.get("ranging_rsi_buy")      ?? config.rsiBuy      ?? 30),
-      rsiSell:     Number(cfgMap.get("ranging_rsi_sell")     ?? config.rsiSell     ?? 70),
-      strongScore: Number(cfgMap.get("ranging_strong_score") ?? config.strongScore ?? 70),
-      weakScore:   Number(cfgMap.get("ranging_weak_score")   ?? config.weakScore   ?? 40),
-    };
-  }
-
-  const strategyAllocations = normalizeStrategyAllocations({
-    watchlist_pullback: cfgMap.get("strategy_alloc_watchlist_pullback"),
-    surge_momentum: cfgMap.get("strategy_alloc_surge_momentum"),
-    institutional_follow: cfgMap.get("strategy_alloc_institutional_follow"),
-  });
-
-  return {
-    maxPositions: Number(cfgMap.get("max_positions") ?? 5) || 5,
-    maxPerSector: Number(cfgMap.get("max_per_sector") ?? 2),
-    strategyAllocations,
-  };
-}
-
 // ─── 일일 리포트 + 포트폴리오 스냅샷 저장 ───────────
 async function runEndOfDay(
   config: EngineConfig,
@@ -300,7 +235,7 @@ async function runEngine(config: EngineConfig) {
       return NextResponse.json({ skipped: true, reason: skipReason });
     }
 
-    const { maxPositions, maxPerSector, strategyAllocations } = applyAppConfig(config, cfgMap);
+  const { maxPositions, maxPerSector, strategyAllocations } = applyEngineAppConfig(config, cfgMap);
 
     let learning = null;
     try { learning = await loadLatestLearning(); } catch { /* 학습 로딩 실패 시 기본값 사용 */ }

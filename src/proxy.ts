@@ -38,7 +38,7 @@ async function verifySessionEdge(token: string, secret: string): Promise<boolean
   }
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // 크론 라우트: CRON_SECRET Bearer 검증

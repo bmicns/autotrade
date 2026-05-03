@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Icon } from "@/components/ui/icons";
 import { EngineHealthCard } from "./engine-health-card";
+import { EngineStateCard } from "./engine-state-card";
 
 interface NewsItem {
   title: string;
@@ -195,6 +196,7 @@ export function HomeTab() {
       )}
 
       <EngineHealthCard />
+      <EngineStateCard />
 
       <div style={{ height: 1, background: COLORS.line, marginTop: 10 }} />
 

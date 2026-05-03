@@ -1,5 +1,6 @@
 import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
+import { readEngineStateSnapshot, selectPendingSignalsForScope } from "@/lib/engine/snapshot";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUUID(v: unknown): v is string { return typeof v === "string" && UUID_RE.test(v); }
@@ -11,21 +12,20 @@ export async function GET(req: NextRequest) {
   if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
 
   const scope = req.nextUrl.searchParams.get("scope") ?? "active";
-  const statuses =
-    scope === "history"
-      ? ["failed", "expired", "rejected"]
-      : ["pending", "approved", "processing"];
-
-  const query = supabase
-    .from("pending_signals")
-    .select("*")
-    .in("status", statuses)
-    .order(scope === "history" ? "resolved_at" : "created_at", { ascending: false });
-
-  const { data, error } = scope === "history" ? await query.limit(20) : await query;
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data || []);
+  const snapshot = await readEngineStateSnapshot();
+  const signals = selectPendingSignalsForScope(snapshot, scope === "history" ? "history" : "active");
+  return NextResponse.json(signals.map((signal) => ({
+    id: signal.id,
+    stock_code: signal.stockCode,
+    stock_name: signal.stockName,
+    status: signal.status,
+    signal_score: signal.score,
+    signal_comment: signal.comment,
+    source: signal.source,
+    created_at: signal.createdAt,
+    resolved_at: signal.resolvedAt,
+    signal_data: signal.signalData,
+  })));
 }
 
 // POST: 신호 승인/거부

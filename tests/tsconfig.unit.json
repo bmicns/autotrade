@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "../.tmp-tests",
+    "rootDir": "..",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "../tests/unit/**/*.test.ts",
+    "../src/lib/engine/control.ts",
+    "../src/lib/engine/event-types.ts",
+    "../src/lib/engine/lifecycle.ts",
+    "../src/lib/engine/market-calendar.ts",
+    "../src/lib/engine/read-model.ts",
+    "../src/lib/engine/snapshot-model.ts",
+    "../src/lib/engine/snapshot.ts",
+    "../src/lib/engine/strategies.ts",
+    "../src/lib/engine/types.ts",
+    "../src/lib/kis/config-state.ts",
+    "../src/lib/kis/runtime-config.ts",
+    "../src/lib/constants.ts"
+  ]
+}

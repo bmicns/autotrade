@@ -1,5 +1,6 @@
 import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
+import { resolveEngineHealth } from "@/lib/engine/control";
 
 export async function GET(req: NextRequest) {
   try {
@@ -51,18 +52,11 @@ export async function GET(req: NextRequest) {
       : null;
 
     // 엔진 헬스체크
-    const kstNow = new Date(Date.now() + 9 * 3600_000);
-    const kstHHMM = kstNow.getHours() * 100 + kstNow.getMinutes();
-    const isMarketHours = kstNow.getDay() >= 1 && kstNow.getDay() <= 5 && kstHHMM >= 930 && kstHHMM <= 1520;
     const lastRunAt = latestRun?.run_at ?? null;
-    const minutesSinceLastRun = lastRunAt
-      ? Math.floor((Date.now() - new Date(lastRunAt).getTime()) / 60_000)
-      : null;
-    const healthStatus =
-      !lastRunAt ? "unknown"
-      : latestRun?.error ? "error"
-      : isMarketHours && minutesSinceLastRun !== null && minutesSinceLastRun > 120 ? "stale"
-      : "healthy";
+    const healthStatus = resolveEngineHealth({
+      lastRunAt,
+      hasError: !!latestRun?.error,
+    });
 
     return NextResponse.json({
       runs: runsResult.data ?? [],
@@ -72,7 +66,7 @@ export async function GET(req: NextRequest) {
       hasMore: (runsResult.count ?? 0) > offset + limit,
       filterLogs,
       marketContext,
-      healthStatus: { status: healthStatus, lastRunAt, minutesSinceLastRun },
+      healthStatus,
     });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

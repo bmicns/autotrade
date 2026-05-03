@@ -22,9 +22,29 @@
 //   created_at timestamptz DEFAULT now()
 // );
 // ─────────────────────────────────────────────────────────────────────────────
+// [Supabase SQL Editor에서 실행] 엔진 상태 이벤트 테이블 생성
+// CREATE TABLE IF NOT EXISTS engine_state_events (
+//   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+//   event_type text NOT NULL,
+//   stock_code text,
+//   entity_table text NOT NULL,
+//   entity_id text,
+//   payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+//   created_at timestamptz DEFAULT now()
+// );
+// ─────────────────────────────────────────────────────────────────────────────
 import { supabase } from "@/lib/supabase/api-client";
 import { type SignalResult } from "@/lib/kis/indicators";
-import { type StrategyKey } from "@/lib/engine/strategies";
+import {
+  buildPartialExitPayload,
+  buildPositionClosePayload,
+  buildPositionOpenPayload,
+  buildTradeMemoryClosePayload,
+  type PendingSignalStatus,
+  type PositionCloseReason,
+  type PositionPhase,
+} from "@/lib/engine/lifecycle";
+import { recordEngineEvent } from "@/lib/engine/event-log";
 
 
 
@@ -35,28 +55,16 @@ export function extractCandlePattern(signal: SignalResult): string {
 }
 
 // ─── Supabase 포지션 관리 ────────────────────────
-export async function openPosition(code: string, name: string | null, price: number, qty: number, signal: SignalResult, phase: "initial" | "full", sector?: string) {
+export async function openPosition(code: string, name: string | null, price: number, qty: number, signal: SignalResult, phase: PositionPhase, sector?: string) {
   try {
-    const strategySignal = signal as SignalResult & {
-      strategyKey?: StrategyKey;
-      allocationPct?: number;
-      sourceStrategy?: string;
-    };
-    await supabase.from("positions").insert({
-      stock_code: code, stock_name: name,
-      entry_price: price, entry_qty: qty,
-      entry_signal: {
-        indicators: signal.indicators,
-        raw: signal.raw,
-        matchCount: signal.matchCount,
-        totalScore: signal.totalScore,
-        strategyKey: strategySignal.strategyKey ?? null,
-        allocationPct: strategySignal.allocationPct ?? null,
-        sourceStrategy: strategySignal.sourceStrategy ?? null,
-      },
-      signal_strength: signal.strength,
-      phase, status: "open",
-      sector: sector ?? null,
+    const payload = buildPositionOpenPayload({ code, name, price, qty, signal, phase, sector });
+    const { data } = await supabase.from("positions").insert(payload).select("id").maybeSingle();
+    await recordEngineEvent({
+      eventType: "position_opened",
+      stockCode: code,
+      entityTable: "positions",
+      entityId: (data?.id as string | undefined) ?? null,
+      payload,
     });
   } catch (e) { console.error("[openPosition] DB 오류:", e); }
 }
@@ -78,7 +86,7 @@ export async function getSectorCounts(): Promise<Map<string, number>> {
   } catch { return new Map(); }
 }
 
-export async function closePosition(code: string, exitPrice: number, exitQty: number, exitReason: string) {
+export async function closePosition(code: string, exitPrice: number, exitQty: number, exitReason: PositionCloseReason) {
   try {
     const { data } = await supabase.from("positions").select("*")
       .eq("stock_code", code).eq("status", "open")
@@ -104,18 +112,20 @@ export async function closePosition(code: string, exitPrice: number, exitQty: nu
       pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 : 0;
     }
 
-    await supabase.from("positions").update({
-      exit_price: exitPrice, exit_qty: exitQty,
-      exit_date: new Date().toISOString(), exit_reason: exitReason,
-      pnl_amount: Math.round(pnlAmount),
-      pnl_percent: Math.round(pnlPercent * 100) / 100,
-      hold_days: holdDays, status: "closed",
-    }).eq("id", pos.id);
+    const payload = buildPositionClosePayload({ exitPrice, exitQty, exitReason, pnlAmount, pnlPercent, holdDays });
+    await supabase.from("positions").update(payload).eq("id", pos.id);
+    await recordEngineEvent({
+      eventType: "position_closed",
+      stockCode: code,
+      entityTable: "positions",
+      entityId: pos.id as string,
+      payload,
+    });
   } catch { /* ignore */ }
 }
 
 // 1차 부분익절 시 가격·수량 기록 (2차 청산 시 블렌드 PnL 산출용)
-export async function recordPartialExit(code: string, price: number, qty: number, nextPhase: string): Promise<void> {
+export async function recordPartialExit(code: string, price: number, qty: number, nextPhase: PositionPhase): Promise<void> {
   try {
     const { data } = await supabase.from("positions")
       .select("id")
@@ -124,14 +134,17 @@ export async function recordPartialExit(code: string, price: number, qty: number
       .order("entry_date", { ascending: true })
       .limit(1);
     if (!data || data.length === 0) return;
+    const payload = buildPartialExitPayload({ price, qty, nextPhase });
     await supabase.from("positions")
-      .update({
-        partial_exit_price: price,
-        partial_exit_qty: qty,
-        phase: nextPhase,
-        updated_at: new Date().toISOString(),
-      })
+      .update(payload)
       .eq("id", data[0].id);
+    await recordEngineEvent({
+      eventType: "partial_exit_recorded",
+      stockCode: code,
+      entityTable: "positions",
+      entityId: data[0].id as string,
+      payload,
+    });
   } catch (e) { console.error("[recordPartialExit] DB 오류:", e); }
 }
 
@@ -156,7 +169,7 @@ export async function recordTradeMemory(params: {
     const profitPrice = params.entryPrice && params.takeProfitPct
       ? Math.round(params.entryPrice * (1 + params.takeProfitPct / 100))
       : null;
-    await supabase.from("trade_memory").insert({
+    const payload = {
       stock_code: params.code,
       stock_name: params.name,
       rsi_value: raw.rsi,
@@ -178,6 +191,14 @@ export async function recordTradeMemory(params: {
       position_size: params.positionSize,
       stop_price: stopPrice,
       profit_price: profitPrice,
+    };
+    const { data } = await supabase.from("trade_memory").insert(payload).select("id").maybeSingle();
+    await recordEngineEvent({
+      eventType: "trade_memory_recorded",
+      stockCode: params.code,
+      entityTable: "trade_memory",
+      entityId: (data?.id as string | undefined) ?? null,
+      payload,
     });
   } catch { /* ignore */ }
 }
@@ -187,7 +208,7 @@ export async function closeTradeMemory(
   pnlPercent: number,
   pnlAmount: number,
   holdDays: number,
-  exitReason: string,
+  exitReason: PositionCloseReason,
   tradeMemoryId?: string
 ): Promise<void> {
   try {
@@ -219,20 +240,21 @@ export async function closeTradeMemory(
       targetId = row.id as string;
     }
 
+    const payload = buildTradeMemoryClosePayload({ pnlPercent, pnlAmount, holdDays, exitReason });
     await supabase.from("trade_memory")
-      .update({
-        pnl_percent: Math.round(pnlPercent * 100) / 100,
-        pnl_amount: Math.round(pnlAmount),
-        hold_days: holdDays,
-        exit_reason: exitReason,
-        is_win: pnlAmount > 0,
-        closed_at: new Date().toISOString(),
-      })
+      .update(payload)
       .eq("id", targetId);
+    await recordEngineEvent({
+      eventType: "trade_memory_closed",
+      stockCode: code,
+      entityTable: "trade_memory",
+      entityId: targetId ?? null,
+      payload,
+    });
   } catch { /* ignore */ }
 }
 
-export async function updatePositionPhase(code: string, phase: string): Promise<void> {
+export async function updatePositionPhase(code: string, phase: PositionPhase): Promise<void> {
   try {
     const { data } = await supabase.from("positions")
       .select("id")
@@ -241,10 +263,36 @@ export async function updatePositionPhase(code: string, phase: string): Promise<
       .order("entry_date", { ascending: true })
       .limit(1);
     if (!data || data.length === 0) return;
+    const payload = { phase, updated_at: new Date().toISOString() };
     await supabase.from("positions")
-      .update({ phase, updated_at: new Date().toISOString() })
+      .update(payload)
       .eq("id", data[0].id);
+    await recordEngineEvent({
+      eventType: "position_phase_changed",
+      stockCode: code,
+      entityTable: "positions",
+      entityId: data[0].id as string,
+      payload,
+    });
   } catch (e) { console.error("[updatePositionPhase] DB 오류:", e); }
+}
+
+export async function resolvePendingSignal(id: string, status: PendingSignalStatus, detail?: string): Promise<void> {
+  const payload = {
+    status,
+    resolved_at: new Date().toISOString(),
+    signal_data: detail ? { resolution_detail: detail } : undefined,
+  };
+  await supabase
+    .from("pending_signals")
+    .update(payload)
+    .eq("id", id);
+  await recordEngineEvent({
+    eventType: "pending_signal_resolved",
+    entityTable: "pending_signals",
+    entityId: id,
+    payload,
+  });
 }
 
 export async function getOpenPosition(code: string) {
@@ -300,7 +348,7 @@ export async function savePendingOrder(params: {
   strategy_key?: string | null;
 }): Promise<void> {
   try {
-    await supabase.from("pending_orders").insert({
+    const payload = {
       stock_code: params.stock_code,
       stock_name: params.stock_name ?? null,
       order_no: params.order_no,
@@ -308,6 +356,14 @@ export async function savePendingOrder(params: {
       limit_price: params.limit_price,
       signal_score: params.signal_score ?? null,
       strategy_key: params.strategy_key ?? null,
+    };
+    const { data } = await supabase.from("pending_orders").insert(payload).select("id").maybeSingle();
+    await recordEngineEvent({
+      eventType: "pending_order_saved",
+      stockCode: params.stock_code,
+      entityTable: "pending_orders",
+      entityId: (data?.id as string | undefined) ?? null,
+      payload,
     });
   } catch { /* ignore */ }
 }
@@ -322,6 +378,12 @@ export async function getPendingOrders(): Promise<PendingOrder[]> {
 export async function deletePendingOrder(orderId: string): Promise<void> {
   try {
     await supabase.from("pending_orders").delete().eq("id", orderId);
+    await recordEngineEvent({
+      eventType: "pending_order_deleted",
+      entityTable: "pending_orders",
+      entityId: orderId,
+      payload: { deleted: true },
+    });
   } catch { /* ignore */ }
 }
 

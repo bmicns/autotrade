@@ -84,3 +84,171 @@ create index if not exists idx_trades_user on trades(user_id);
 create index if not exists idx_trades_executed on trades(executed_at desc);
 create index if not exists idx_signals_user_status on signals(user_id, status);
 create index if not exists idx_strategies_user_active on strategies(user_id, is_active);
+
+-- ============================================================================
+-- NEXIO runtime engine schema
+-- ============================================================================
+
+create table if not exists app_config (
+  key text primary key,
+  value jsonb,
+  updated_at timestamptz default now()
+);
+
+create table if not exists kis_config (
+  id text primary key,
+  app_key text,
+  app_secret text,
+  account_no text,
+  token text,
+  token_expiry timestamptz,
+  updated_at timestamptz default now()
+);
+
+create table if not exists watchlist (
+  id uuid primary key default gen_random_uuid(),
+  code text not null unique,
+  name text,
+  active boolean not null default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists pending_signals (
+  id uuid primary key default gen_random_uuid(),
+  stock_code text not null,
+  stock_name text,
+  signal_score integer,
+  signal_comment text,
+  signal_data jsonb default '{}'::jsonb,
+  source text,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'processing', 'expired', 'rejected', 'failed')),
+  resolved_at timestamptz,
+  created_at timestamptz default now()
+);
+
+create table if not exists positions (
+  id uuid primary key default gen_random_uuid(),
+  stock_code text not null,
+  stock_name text,
+  entry_price integer not null,
+  entry_qty integer not null,
+  entry_date timestamptz not null default now(),
+  entry_signal jsonb,
+  signal_strength text,
+  phase text not null default 'initial' check (phase in ('initial', 'full', 'partial_tp', 'final_tp')),
+  sector text,
+  partial_exit_price integer,
+  partial_exit_qty integer,
+  exit_price integer,
+  exit_qty integer,
+  exit_date timestamptz,
+  exit_reason text,
+  pnl_amount integer,
+  pnl_percent numeric,
+  hold_days integer,
+  status text not null default 'open' check (status in ('open', 'closed')),
+  updated_at timestamptz default now()
+);
+
+create table if not exists pending_orders (
+  id uuid primary key default gen_random_uuid(),
+  stock_code text not null,
+  stock_name text,
+  order_no text not null,
+  order_qty integer not null,
+  limit_price integer not null,
+  signal_score integer,
+  strategy_key text,
+  created_at timestamptz default now()
+);
+
+create table if not exists trade_memory (
+  id uuid primary key default gen_random_uuid(),
+  stock_code text not null,
+  stock_name text,
+  rsi_value numeric,
+  macd_histogram numeric,
+  ma_cross text,
+  bb_position text,
+  volume_ratio numeric,
+  adx_value numeric,
+  candle_pattern text,
+  regime text,
+  base_score integer,
+  learned_score integer,
+  total_score integer,
+  market_bonus integer,
+  investor_bonus integer,
+  snapshot_bonus integer,
+  weights_source text,
+  atr_value numeric,
+  position_size integer,
+  stop_price integer,
+  profit_price integer,
+  pnl_percent numeric,
+  pnl_amount integer,
+  hold_days integer,
+  exit_reason text,
+  is_win boolean,
+  closed_at timestamptz,
+  created_at timestamptz default now()
+);
+
+create table if not exists engine_runs (
+  id uuid primary key default gen_random_uuid(),
+  run_at timestamptz not null default now(),
+  trade_count integer not null default 0,
+  scanned_count integer not null default 0,
+  duration_ms integer not null default 0,
+  actions jsonb not null default '[]'::jsonb,
+  error text,
+  created_at timestamptz default now()
+);
+
+create table if not exists learning_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  weights jsonb,
+  atr_multipliers jsonb,
+  position_sizing jsonb,
+  risk jsonb,
+  pattern_stats jsonb,
+  confidence text,
+  sample_size integer,
+  win_rate numeric,
+  avg_win numeric,
+  avg_loss numeric,
+  is_active boolean default true,
+  expires_at timestamptz,
+  created_at timestamptz default now()
+);
+
+create table if not exists portfolio_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  date date not null unique,
+  total_eval integer not null default 0,
+  total_pnl integer not null default 0,
+  cash_balance integer not null default 0,
+  open_positions integer not null default 0,
+  created_at timestamptz default now()
+);
+
+create table if not exists engine_state_events (
+  id uuid primary key default gen_random_uuid(),
+  event_type text not null,
+  stock_code text,
+  entity_table text not null,
+  entity_id text,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_watchlist_active on watchlist(active);
+create index if not exists idx_pending_signals_status on pending_signals(status, created_at desc);
+create index if not exists idx_positions_status on positions(status, entry_date desc);
+create index if not exists idx_pending_orders_created on pending_orders(created_at asc);
+create index if not exists idx_trade_memory_created on trade_memory(created_at desc);
+create index if not exists idx_trade_memory_closed on trade_memory(closed_at desc);
+create index if not exists idx_engine_runs_run_at on engine_runs(run_at desc);
+create index if not exists idx_learning_snapshots_created on learning_snapshots(created_at desc);
+create index if not exists idx_engine_state_events_created on engine_state_events(created_at desc);

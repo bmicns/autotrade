@@ -1,7 +1,7 @@
 import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextResponse } from "next/server";
 import { getActiveKisConfig, getDbKisConfig, getEnvKisConfig } from "@/lib/kis/runtime-config";
-import { KIS_API_BASE, KIS_RUNTIME_MODE } from "@/lib/constants";
+import { buildKisConfigState } from "@/lib/kis/config-state";
 
 
 const ID = "default";
@@ -20,28 +20,11 @@ export async function GET() {
     .eq("id", ID)
     .maybeSingle();
 
-  if (!active) {
-    return NextResponse.json({
-      appKey: "",
-      appSecret: "",
-      accountNo: "",
-      source: null,
-      hasEnvConfig: !!envConfig,
-      hasDbConfig: !!dbConfig,
-    });
-  }
-
+  const state = buildKisConfigState({ active, envConfig, dbConfig });
   return NextResponse.json({
-    appKey: active.config.appKey,
-    appSecret: active.config.appSecret,
-    accountNo: active.config.accountNo,
+    ...state,
     token: data?.token ?? "",
     tokenExpiry: data?.token_expiry ?? "",
-    source: active.source,
-    runtimeMode: KIS_RUNTIME_MODE,
-    apiBaseUrl: KIS_API_BASE,
-    hasEnvConfig: !!envConfig,
-    hasDbConfig: !!dbConfig,
   });
 }
 

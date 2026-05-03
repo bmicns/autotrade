@@ -1,8 +1,7 @@
 import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 import { analyzePerformance, type Position } from "@/lib/analytics";
-
-const CLOSE_TYPES = new Set(["take_profit", "stop_loss", "trailing_stop", "max_hold_sell"]);
+import { STATS_CLOSE_TYPES } from "@/lib/engine/lifecycle";
 
 // detail 문자열에서 첫 번째 pnl% 파싱: "(19.5% ≥ ..." → 19.5
 function parsePnlPct(detail: string): number | null {
@@ -29,7 +28,7 @@ async function buildPositionsFromEngineRuns(dateFilter: string | null): Promise<
 
   for (const run of data) {
     for (const action of (run.actions as EngineAction[]) ?? []) {
-      if (!CLOSE_TYPES.has(action.type) || !action.code) continue;
+      if (!STATS_CLOSE_TYPES.has(action.type) || !action.code) continue;
       const pnlPct = action.detail ? parsePnlPct(action.detail) : null;
       if (pnlPct === null) continue;
 

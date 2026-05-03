@@ -1,10 +1,7 @@
 import { create } from "zustand";
 import { fetchBalance, fetchPrices } from "./kis/client";
-
-// 헬스 폴링 핸들 — 단일 인터벌 보장 (모듈 스코프)
-let healthPollHandle: ReturnType<typeof setInterval> | null = null;
-// in-flight 응답이 stop 이후에 도착해도 상태를 덮어쓰지 않도록 하는 플래그
-let healthPollActive = false;
+import { loadFromStorage, saveToStorage } from "@/lib/browser-storage";
+import { startKisHealthPolling, stopKisHealthPolling } from "@/lib/kis/health-poller";
 
 type Tab = "home" | "signal" | "portfolio" | "stats" | "strategy" | "settings";
 
@@ -132,23 +129,6 @@ interface AppState {
   hydrate: () => void;
 }
 
-function loadFromStorage<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveToStorage(key: string, value: unknown) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch { /* ignore */ }
-}
-
 async function hasOpenPositions(): Promise<boolean> {
   try {
     const res = await fetch("/api/positions");
@@ -247,35 +227,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   kisLatencyMs: null,
 
   startHealthPolling: () => {
-    if (healthPollHandle !== null) return; // 중복 인터벌 방지
-    healthPollActive = true;
-    const poll = async () => {
-      if (!healthPollActive) return;
-      try {
-        const res = await fetch("/api/kis/health");
-        // 응답 수신 전에 stopHealthPolling이 호출된 경우 상태 갱신 생략
-        if (!healthPollActive) return;
-        if (res.ok) {
-          const data = await res.json();
-          if (!healthPollActive) return;
-          set({
-            kisConnected: data.connected,
-            kisHealthLastChecked: data.lastChecked ?? null,
-            kisLatencyMs: typeof data.latencyMs === "number" ? data.latencyMs : null,
-          });
-        }
-      } catch { /* 무시 */ }
-    };
-    poll(); // 즉시 1회 실행 — 앱 시작 직후 null 상태 60초 노출 방지
-    healthPollHandle = setInterval(poll, 60_000);
+    startKisHealthPolling({
+      fetchHealth: () => fetch("/api/kis/health"),
+      onSuccess: ({ connected, lastChecked, latencyMs }) => {
+        set({
+          kisConnected: connected,
+          kisHealthLastChecked: lastChecked,
+          kisLatencyMs: latencyMs,
+        });
+      },
+    });
   },
 
   stopHealthPolling: () => {
-    healthPollActive = false;
-    if (healthPollHandle !== null) {
-      clearInterval(healthPollHandle);
-      healthPollHandle = null;
-    }
+    stopKisHealthPolling();
   },
 
   pendingCount: 0,

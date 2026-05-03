@@ -88,15 +88,14 @@ export function StrategyTab() {
   const tradeSettings   = useAppStore((s) => s.tradeSettings);
   const setTradeSettings = useAppStore((s) => s.setTradeSettings);
   const [editKey, setEditKey] = useState<SettingKey | null>(null);
-  const [uncoveredCrons, setUncoveredCrons] = useState<string[]>([]);
   const [signalEditKey, setSignalEditKey] = useState<keyof SignalThresholds | null>(null);
   const { optimize, optimizing, optimizeResult, optimizeError, setOptimizeResult } = useThresholdsOptimize();
 
   const { runs, loading: loadingRuns, fetchEngineLog } = useEngineLog(5);
   const { learning, loading: loadingLearn, fetchLearning } = useLearning();
   const { thresholds, setThresholds, allocations, holidays, loaded: configLoaded, fetchEngineControl } = useEngineControl();
+  const uncoveredCrons = calcUncoveredCrons(tradeSettings);
 
-  useEffect(() => { setUncoveredCrons(calcUncoveredCrons(tradeSettings)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     fetchEngineLog();
     fetchLearning();
@@ -108,7 +107,6 @@ export function StrategyTab() {
     setTradeSettings(next);
     setEditKey(null);
     saveTradeSettings(partial).catch(() => {});
-    setUncoveredCrons(calcUncoveredCrons(next));
   }, [tradeSettings, setTradeSettings]);
 
   const handleSignalSave = useCallback((partial: Partial<SignalThresholds>) => {
@@ -122,7 +120,7 @@ export function StrategyTab() {
     setThresholds(recommended);
     setOptimizeResult(null);
     setSignalThresholds(recommended).catch(() => {});
-  }, []);
+  }, [setOptimizeResult, setThresholds]);
 
   const editMeta = editKey ? SETTING_METAS.find((m) => m.key === editKey) : null;
 
