@@ -9,14 +9,15 @@ export async function POST(req: NextRequest) {
       appSecret?: string;
       token?: string;
       accountNo?: string;
+      accountProductCode?: string;
     };
-    const { code, appKey, appSecret, token, accountNo = "" } = body;
+    const { code, appKey, appSecret, token, accountNo = "", accountProductCode = "01" } = body;
 
     if (!code || !appKey || !appSecret || !token) {
       return NextResponse.json({ error: "code, appKey, appSecret, token 필수" }, { status: 400 });
     }
 
-    const data = await getPrice({ appKey, appSecret, accountNo, token }, code);
+    const data = await getPrice({ appKey, appSecret, accountNo, accountProductCode, token }, code);
     return NextResponse.json(data);
   } catch (e: unknown) {
     console.error("[price] 시세 조회 오류:", e);

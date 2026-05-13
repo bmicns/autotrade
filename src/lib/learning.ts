@@ -9,10 +9,11 @@ import {
   learnWeights,
   learnAtrMultipliers,
   learnPositionSizing,
-  learnRiskParamsTakeProfitRatio,
+  learnRiskParamsPartialExitRatio,
   learnPatternStats,
   saveLearning,
   calcOverallStats,
+  buildLearningDatasetSummary,
 } from "@/lib/learning-engine";
 
 // 타입 re-export (외부에서 @/lib/learning에서 import 가능)
@@ -43,7 +44,6 @@ export interface LearningSnapshot {
   weights_ranging: Record<string, number>;
   weights_source: string;
   atr_mult_stop: number;
-  atr_mult_profit: number;
   atr_mult_trailing: number;
   atr_source: string;
   target_risk_amount: number;
@@ -70,7 +70,7 @@ export async function loadLatestLearning(): Promise<import("@/lib/learning-engin
       .limit(1)
       .single();
 
-    if (active) return snapshotToResult(active as LearningSnapshot, false);
+    if (active) return snapshotToResult(active as LearningSnapshot);
 
     const { data: fallback } = await supabase
       .from("learning_snapshots")
@@ -84,7 +84,7 @@ export async function loadLatestLearning(): Promise<import("@/lib/learning-engin
         (Date.now() - new Date(fallback.created_at).getTime()) / 86400000
       );
       console.warn(`⚠️ 학습 만료됨 (${daysSince}일 전). 폴백 스냅샷 사용 중.`);
-      return snapshotToResult(fallback as LearningSnapshot, true);
+      return snapshotToResult(fallback as LearningSnapshot);
     }
 
     return null;
@@ -93,8 +93,7 @@ export async function loadLatestLearning(): Promise<import("@/lib/learning-engin
   }
 }
 
-function snapshotToResult(snap: LearningSnapshot, isExpired: boolean): import("@/lib/learning-engine").LearningResult {
-  void isExpired;
+function snapshotToResult(snap: LearningSnapshot): import("@/lib/learning-engine").LearningResult {
   return {
     weights: {
       trending: snap.weights_trending ?? { ...BASE_WEIGHTS.trending },
@@ -105,7 +104,6 @@ function snapshotToResult(snap: LearningSnapshot, isExpired: boolean): import("@
     },
     atrMultipliers: {
       stop: snap.atr_mult_stop ?? DEFAULT_ATR_MULTIPLIERS.stop,
-      profit: snap.atr_mult_profit ?? DEFAULT_ATR_MULTIPLIERS.profit,
       trailing: snap.atr_mult_trailing ?? DEFAULT_ATR_MULTIPLIERS.trailing,
       source: (snap.atr_source ?? "default") as "learned" | "default",
       sampleSize: snap.sample_size ?? 0,
@@ -115,7 +113,7 @@ function snapshotToResult(snap: LearningSnapshot, isExpired: boolean): import("@
       source: (snap.sizing_source ?? "default") as "learned" | "default",
     },
     risk: {
-      takeProfitRatio: snap.take_profit_ratio ?? 50,
+      partialExitRatio: snap.take_profit_ratio ?? 50,
       source: (snap.risk_source ?? "default") as "learned" | "default",
     },
     patternStats: snap.pattern_stats ?? { rsiRanges: [], macdPatterns: [], combos: [] },
@@ -134,7 +132,7 @@ export async function runLearning(): Promise<import("@/lib/learning-engine").Lea
     learnWeights(30),
     learnAtrMultipliers(60),
     learnPositionSizing(),
-    learnRiskParamsTakeProfitRatio(60),
+    learnRiskParamsPartialExitRatio(60),
     learnPatternStats(60),
   ]);
 
@@ -165,18 +163,82 @@ export interface AppliedLearning {
   weights: { trending: Record<string, number>; ranging: Record<string, number> } | undefined;
   atrMultipliers: AtrMultipliers;
   targetRiskAmount: number;
-  takeProfitRatio: number;
+  partialExitRatio: number;
+  riskAdjustments: {
+    surgeEntryTagPenalties: Record<string, number>;
+    timeBucketPenalties: Record<string, number>;
+    newsKeywordPenalties: Record<string, number>;
+  };
+}
+
+export async function buildLearningRiskAdjustments(lookbackDays = 180): Promise<AppliedLearning["riskAdjustments"]> {
+  const defaults: AppliedLearning["riskAdjustments"] = {
+    surgeEntryTagPenalties: {},
+    timeBucketPenalties: {},
+    newsKeywordPenalties: {},
+  };
+
+  const summary = await buildLearningDatasetSummary(lookbackDays);
+  if (summary.sampleCount === 0) return defaults;
+
+  const surgeEntryTagPenalties = Object.fromEntries(
+    summary.surgeEntryStats
+      .filter((item) => item.count >= 4 && (item.winRate < 45 || item.stopLossRate >= 35 || item.avgPnl < 0))
+      .map((item) => {
+        let penalty = 4;
+        if (item.winRate < 40) penalty += 2;
+        if (item.stopLossRate >= 45) penalty += 2;
+        if (item.avgPnl < 0) penalty += 2;
+        return [item.tag, penalty];
+      }),
+  );
+
+  const timeBucketPenalties = Object.fromEntries(
+    summary.timeBucketStats
+      .filter((item) => item.count >= 4 && (item.winRate < 45 || item.stopLossRate >= 35 || item.avgPnl < 0))
+      .map((item) => {
+        let penalty = 3;
+        if (item.winRate < 40) penalty += 2;
+        if (item.stopLossRate >= 45) penalty += 2;
+        if (item.avgPnl < 0) penalty += 1;
+        return [item.bucket, penalty];
+      }),
+  );
+
+  const newsKeywordPenalties = Object.fromEntries(
+    summary.keywordStats
+      .filter((item) => item.count >= 4 && (item.winRate < 45 || item.stopLossRate >= 35 || item.avgPnl < 0))
+      .map((item) => {
+        let penalty = 3;
+        if (item.winRate < 40) penalty += 2;
+        if (item.stopLossRate >= 45) penalty += 2;
+        if (item.avgPnl < 0) penalty += 2;
+        return [item.keyword, penalty];
+      }),
+  );
+
+  return {
+    surgeEntryTagPenalties,
+    timeBucketPenalties,
+    newsKeywordPenalties,
+  };
 }
 
 export function applyLearning(
   learned: import("@/lib/learning-engine").LearningResult | null,
-  config: { takeProfitRatio?: number }
+  config: { partialExitRatio?: number },
+  riskAdjustments?: AppliedLearning["riskAdjustments"]
 ): AppliedLearning {
   const defaults: AppliedLearning = {
     weights: undefined,
     atrMultipliers: DEFAULT_ATR_MULTIPLIERS,
     targetRiskAmount: 30000,
-    takeProfitRatio: config.takeProfitRatio ?? 50,
+    partialExitRatio: config.partialExitRatio ?? 50,
+    riskAdjustments: riskAdjustments ?? {
+      surgeEntryTagPenalties: {},
+      timeBucketPenalties: {},
+      newsKeywordPenalties: {},
+    },
   };
 
   if (!learned || learned.confidence === "none") return defaults;
@@ -204,7 +266,8 @@ export function applyLearning(
       weights: blendedWeights,
       atrMultipliers: learned.atrMultipliers,
       targetRiskAmount: learned.positionSizing.targetRiskAmount,
-      takeProfitRatio: defaults.takeProfitRatio,
+      partialExitRatio: defaults.partialExitRatio,
+      riskAdjustments: defaults.riskAdjustments,
     };
   }
 
@@ -213,6 +276,7 @@ export function applyLearning(
     weights: learned.weights,
     atrMultipliers: learned.atrMultipliers,
     targetRiskAmount: learned.positionSizing.targetRiskAmount,
-    takeProfitRatio: learned.risk.takeProfitRatio,
+    partialExitRatio: learned.risk.partialExitRatio,
+    riskAdjustments: defaults.riskAdjustments,
   };
 }

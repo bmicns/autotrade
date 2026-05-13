@@ -5,9 +5,6 @@ export const END_OF_DAY_TIME = 1500;
 // 승인 신호 매수 비율 (maxPerTrade 대비)
 export const APPROVED_BUY_RATIO = 0.5;
 
-// 2차 익절 비율 (%)
-export const SECOND_TP_RATIO = 30;
-
 // 투자자 트렌드 보너스 점수
 export const INVESTOR_BONUS_BOTH     =  25;  // 기관+외국인 동반매수
 export const INVESTOR_BONUS_ORGN     =  15;  // 기관 순매수
@@ -42,10 +39,17 @@ export const MARKET_PENALTY_STRONG = -20;  // avgRate <= -1.0%
 export const KOSPI_TRENDING_THRESHOLD = 0.5;
 
 // KIS API 호출 간격 (서버리스 Rate Limit 준수)
-export const KIS_RATE_LIMIT_DELAY_MS = 200;
+export const KIS_RATE_LIMIT_DELAY_MS = 350;
 
-// 지정가 매수 할인율 (현재가 대비)
-export const LIMIT_BUY_DISCOUNT = 0.995;
+// 종목별 일일 최대 진입 횟수 (첫 진입 포함)
+export const MAX_DAILY_ENTRIES_PER_STOCK = 2;
+export const SURGE_MAX_DAILY_ENTRIES_PER_STOCK = 4;
+export const SURGE_REENTRY_BUY_RATIO = 0.7;
+export const SURGE_TRAILING_PARTIAL_EXIT_RATIO = 35;
+export const SURGE_TIGHT_STOP_LOSS = -2.8;
+export const SURGE_TIGHT_TRAILING_STOP = -1.4;
 
-// 2차 익절 실행 비율 (phase=partial_tp → final_tp 전환 시 매도 비율)
-export const SECOND_TP_SELL_RATIO = 30; // %
+// 최근 실패 누적 기반 자동 정지 기준
+export const ENGINE_CONSECUTIVE_ERROR_HALT_COUNT = 3;
+export const ENGINE_CONSECUTIVE_TOKEN_ERROR_HALT_COUNT = 2;
+export const ENGINE_CONSECUTIVE_ORDER_FAILURE_HALT_COUNT = 3;

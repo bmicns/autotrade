@@ -14,7 +14,7 @@ import { StrategyTab } from "@/components/strategy/strategy-tab";
 import { SettingsTab } from "@/components/settings/settings-tab";
 
 export default function App() {
-  const { tab, hydrate } = useAppStore();
+  const { tab, marketScope, hydrate } = useAppStore();
   const [isMobile, setIsMobile] = useState(true);
 
   useEffect(() => {
@@ -27,10 +27,10 @@ export default function App() {
 
   const page = () => {
     switch (tab) {
-      case "home": return <HomeTab />;
-      case "signal": return <SignalTab />;
-      case "portfolio": return <PortfolioTab />;
-      case "stats": return <StatsTab />;
+      case "home": return <HomeTab marketMode={marketScope} />;
+      case "signal": return <SignalTab marketMode={marketScope} />;
+      case "portfolio": return <PortfolioTab marketMode={marketScope} />;
+      case "stats": return <StatsTab marketMode={marketScope} />;
       case "strategy": return <StrategyTab />;
       case "settings": return <SettingsTab />;
     }
@@ -41,7 +41,7 @@ export default function App() {
       {!isMobile && <SideBar />}
       <div style={{ marginLeft: isMobile ? 0 : 182 }}>
         <TopBar />
-        <div style={{ paddingBottom: isMobile ? 90 : 40 }}>
+        <div style={{ paddingBottom: isMobile ? 120 : 40 }}>
           {page()}
         </div>
       </div>

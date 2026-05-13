@@ -10,14 +10,15 @@ export async function POST(req: NextRequest) {
       appSecret?: string;
       token?: string;
       accountNo?: string;
+      accountProductCode?: string;
     };
-    const { appKey, appSecret, token, accountNo } = body;
+    const { appKey, appSecret, token, accountNo, accountProductCode } = body;
 
     if (!appKey || !appSecret || !token || !accountNo) {
       return NextResponse.json({ error: "appKey, appSecret, token, accountNo 필수" }, { status: 400 });
     }
 
-    const data = await getBalance({ appKey, appSecret, accountNo, token });
+    const data = await getBalance({ appKey, appSecret, accountNo, accountProductCode, token });
     return NextResponse.json(data);
   } catch (e: unknown) {
     if (e instanceof KISError) {

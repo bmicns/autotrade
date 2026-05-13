@@ -9,9 +9,9 @@ export type StrategyKey = (typeof STRATEGY_KEYS)[number];
 export type StrategyAllocations = Record<StrategyKey, number>;
 
 export const DEFAULT_STRATEGY_ALLOCATIONS: StrategyAllocations = {
-  watchlist_pullback: 40,
-  surge_momentum: 25,
-  institutional_follow: 35,
+  watchlist_pullback: 20,
+  surge_momentum: 40,
+  institutional_follow: 40,
 };
 
 export function normalizeStrategyAllocations(

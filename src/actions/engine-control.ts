@@ -1,6 +1,7 @@
 "use server";
 
-import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
+import { getSupabaseConfigError } from "@/lib/supabase/api-client";
+import { buildEngineControlUpdates, upsertAppConfigEntries } from "@/lib/engine/app-config";
 
 function checkAdminSecret() {
   const secret = process.env.ADMIN_SECRET;
@@ -9,49 +10,28 @@ function checkAdminSecret() {
   if (supabaseError) throw new Error(supabaseError);
 }
 
-export async function setEngineEnabled(enabled: boolean) {
+async function saveAppConfig(input: Parameters<typeof buildEngineControlUpdates>[0]) {
   checkAdminSecret();
-  if (typeof enabled !== "boolean") throw new Error("enabled 필드는 boolean이어야 합니다");
-
-  const { error } = await supabase
-    .from("app_config")
-    .upsert({ key: "engine_enabled", value: enabled, updated_at: new Date().toISOString() });
-  if (error) throw new Error(error.message);
+  const updates = buildEngineControlUpdates(input);
+  await upsertAppConfigEntries(updates, { actor: "session", source: "server-action" });
   return { ok: true };
+}
+
+export async function setEngineEnabled(enabled: boolean) {
+  return saveAppConfig({ enabled });
 }
 
 export async function setMaxPositions(max_positions: number) {
-  checkAdminSecret();
-  const val = Number(max_positions);
-  if (!Number.isInteger(val) || val < 1 || val > 20) {
-    throw new Error("max_positions는 1~20 정수여야 합니다");
-  }
-  const { error } = await supabase
-    .from("app_config")
-    .upsert({ key: "max_positions", value: val, updated_at: new Date().toISOString() });
-  if (error) throw new Error(error.message);
-  return { ok: true };
+  return saveAppConfig({ maxPositions: max_positions });
 }
 
 export async function setMaxPerSector(max_per_sector: number) {
-  checkAdminSecret();
-  const val = Number(max_per_sector);
-  if (!Number.isInteger(val) || val < 1 || val > 10) {
-    throw new Error("max_per_sector는 1~10 정수여야 합니다");
-  }
-  const { error } = await supabase
-    .from("app_config")
-    .upsert({ key: "max_per_sector", value: val, updated_at: new Date().toISOString() });
-  if (error) throw new Error(error.message);
-  return { ok: true };
+  return saveAppConfig({ maxPerSector: max_per_sector });
 }
 
 export async function saveTradeSettings(s: Partial<{
-  maxAmountPerTrade: number;
   maxTradesPerDay: number;
   stopLoss: number;
-  takeProfit: number;
-  takeProfitRatio: number;
   trailingStop: number;
   morningStart: string;
   morningEnd: string;
@@ -60,42 +40,21 @@ export async function saveTradeSettings(s: Partial<{
   dailyLossLimit: number;
   maxHoldDays: number;
 }>) {
-  checkAdminSecret();
-  const mapping: Array<[string, number | string | undefined]> = [
-    ["max_amount_per_trade", s.maxAmountPerTrade],
-    ["max_trades_per_day",   s.maxTradesPerDay],
-    ["stop_loss",            s.stopLoss],
-    ["take_profit",          s.takeProfit],
-    ["take_profit_ratio",    s.takeProfitRatio],
-    ["trailing_stop",        s.trailingStop],
-    ["morning_start",        s.morningStart],
-    ["morning_end",          s.morningEnd],
-    ["afternoon_start",      s.afternoonStart],
-    ["afternoon_end",        s.afternoonEnd],
-    ["daily_loss_limit",     s.dailyLossLimit],
-    ["max_hold_days",        s.maxHoldDays],
-  ];
-  for (const [key, value] of mapping) {
-    if (value === undefined) continue;
-    const { error } = await supabase
-      .from("app_config")
-      .upsert({ key, value, updated_at: new Date().toISOString() });
-    if (error) throw new Error(error.message);
-  }
-  return { ok: true };
+  return saveAppConfig({
+    maxTradesPerDay: s.maxTradesPerDay,
+    stopLoss: s.stopLoss,
+    trailingStop: s.trailingStop,
+    morningStart: s.morningStart,
+    morningEnd: s.morningEnd,
+    afternoonStart: s.afternoonStart,
+    afternoonEnd: s.afternoonEnd,
+    dailyLossLimit: s.dailyLossLimit,
+    maxHoldDays: s.maxHoldDays,
+  });
 }
 
 export async function setMarketCrashThreshold(threshold: number) {
-  checkAdminSecret();
-  const val = Number(threshold);
-  if (isNaN(val) || val > 0 || val < -20) {
-    throw new Error("market_crash_threshold는 -20 ~ 0 사이 숫자여야 합니다");
-  }
-  const { error } = await supabase
-    .from("app_config")
-    .upsert({ key: "market_crash_threshold", value: val, updated_at: new Date().toISOString() });
-  if (error) throw new Error(error.message);
-  return { ok: true };
+  return saveAppConfig({ marketCrashThreshold: threshold });
 }
 
 export async function setSignalThresholds(thresholds: {
@@ -103,44 +62,13 @@ export async function setSignalThresholds(thresholds: {
   rsiSell?: number;
   strongScore?: number;
   weakScore?: number;
+  sellRuleSensitivity?: number;
 }) {
-  checkAdminSecret();
+  return saveAppConfig(thresholds);
+}
 
-  const { rsiBuy, rsiSell, strongScore, weakScore } = thresholds;
-
-  if (rsiBuy !== undefined) {
-    const val = Number(rsiBuy);
-    if (!Number.isInteger(val) || val < 1 || val > 99) throw new Error("rsiBuy는 1~99 정수여야 합니다");
-  }
-  if (rsiSell !== undefined) {
-    const val = Number(rsiSell);
-    if (!Number.isInteger(val) || val < 1 || val > 99) throw new Error("rsiSell은 1~99 정수여야 합니다");
-  }
-  if (strongScore !== undefined) {
-    const val = Number(strongScore);
-    if (!Number.isInteger(val) || val < 1 || val > 100) throw new Error("strongScore는 1~100 정수여야 합니다");
-  }
-  if (weakScore !== undefined) {
-    const val = Number(weakScore);
-    if (!Number.isInteger(val) || val < 1 || val > 100) throw new Error("weakScore는 1~100 정수여야 합니다");
-  }
-
-  const mapping: Array<[string, number | undefined]> = [
-    ["rsi_buy",      rsiBuy      !== undefined ? Number(rsiBuy)      : undefined],
-    ["rsi_sell",     rsiSell     !== undefined ? Number(rsiSell)     : undefined],
-    ["strong_score", strongScore !== undefined ? Number(strongScore) : undefined],
-    ["weak_score",   weakScore   !== undefined ? Number(weakScore)   : undefined],
-  ];
-
-  for (const [key, value] of mapping) {
-    if (value === undefined) continue;
-    const { error } = await supabase
-      .from("app_config")
-      .upsert({ key, value, updated_at: new Date().toISOString() });
-    if (error) throw new Error(error.message);
-  }
-
-  return { ok: true };
+export async function setSellRuleSensitivity(sellRuleSensitivity: number) {
+  return saveAppConfig({ sellRuleSensitivity });
 }
 
 export async function setStrategyAllocations(allocations: {
@@ -148,53 +76,29 @@ export async function setStrategyAllocations(allocations: {
   surgeMomentum?: number;
   institutionalFollow?: number;
 }) {
-  checkAdminSecret();
-
-  const mapping: Array<[string, number | undefined]> = [
-    ["strategy_alloc_watchlist_pullback", allocations.watchlistPullback],
-    ["strategy_alloc_surge_momentum", allocations.surgeMomentum],
-    ["strategy_alloc_institutional_follow", allocations.institutionalFollow],
-  ];
-
-  for (const [, value] of mapping) {
-    if (value === undefined) continue;
-    const val = Number(value);
-    if (!Number.isFinite(val) || val < 0 || val > 100) {
-      throw new Error("전략 배분 비율은 0~100 사이 숫자여야 합니다");
-    }
-  }
-
-  for (const [key, value] of mapping) {
-    if (value === undefined) continue;
-    const { error } = await supabase
-      .from("app_config")
-      .upsert({ key, value: Number(value), updated_at: new Date().toISOString() });
-    if (error) throw new Error(error.message);
-  }
-
-  return { ok: true };
+  return saveAppConfig(allocations);
 }
 
 export async function setMarketHolidays(holidays: string[] | string) {
-  checkAdminSecret();
+  return saveAppConfig({ marketHolidays: holidays });
+}
 
-  const values = Array.isArray(holidays)
-    ? holidays.map((value) => String(value).trim()).filter(Boolean)
-    : String(holidays)
-        .split(/[\n,]/)
-        .map((value) => value.trim())
-        .filter(Boolean);
-
-  for (const value of values) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      throw new Error("market_holidays는 YYYY-MM-DD 형식이어야 합니다");
-    }
-  }
-
-  const { error } = await supabase
-    .from("app_config")
-    .upsert({ key: "market_holidays", value: values, updated_at: new Date().toISOString() });
-  if (error) throw new Error(error.message);
-
-  return { ok: true };
+export async function saveSurgeSettings(settings: Partial<{
+  surgeMaxDailyEntriesPerStock: number;
+  surgeReentryBuyRatio: number;
+  surgeTrailingPartialExitRatio: number;
+  surgeTightStopLoss: number;
+  surgeTightTrailingStop: number;
+  surgeOpenBonus: number;
+  surgeMorningBonus: number;
+  surgeLatePenalty: number;
+  surgeReentryCooldownMinutes: number;
+  surgeNewsPositiveBonus: number;
+  surgeNewsNegativePenalty: number;
+  surgeNewsRiskCooldownMinutes: number;
+  learningRiskAdjustmentsEnabled: boolean;
+  manualUsBuyNoteTemplates: string[] | string;
+  manualUsSellNoteTemplates: string[] | string;
+}>) {
+  return saveAppConfig(settings);
 }

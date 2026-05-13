@@ -1,4 +1,4 @@
-import type { SignalResult } from "@/lib/kis/indicators";
+import type { SignalRaw, SignalResult } from "@/lib/kis/indicators";
 import type { StrategyKey } from "@/lib/engine/strategies";
 
 export const POSITION_PHASES = ["initial", "full", "partial_tp", "final_tp"] as const;
@@ -17,28 +17,61 @@ export const PENDING_SIGNAL_STATUSES = [
 ] as const;
 export type PendingSignalStatus = (typeof PENDING_SIGNAL_STATUSES)[number];
 
-export const POSITION_CLOSE_REASONS = [
+export const CURRENT_POSITION_CLOSE_REASONS = [
   "stop_loss",
-  "take_profit",
   "trailing_stop",
   "max_hold_sell",
   "orgn_flip_sell",
+  "signal_rule_sell",
   "manual_sell",
+  "reconcile_orphan",
 ] as const;
-export type PositionCloseReason = (typeof POSITION_CLOSE_REASONS)[number];
 
-export const STATS_CLOSE_TYPES = new Set<string>(POSITION_CLOSE_REASONS);
+export const LEGACY_POSITION_CLOSE_REASONS = [
+  "take_profit",
+] as const;
+
+export type PositionCloseReason =
+  | (typeof CURRENT_POSITION_CLOSE_REASONS)[number]
+  | (typeof LEGACY_POSITION_CLOSE_REASONS)[number];
+
+export const HISTORICAL_CLOSE_TYPES = new Set<string>([
+  ...CURRENT_POSITION_CLOSE_REASONS,
+  ...LEGACY_POSITION_CLOSE_REASONS,
+]);
+
+export const CURRENT_SELL_ACTION_TYPES = new Set<string>(CURRENT_POSITION_CLOSE_REASONS);
 
 export function resolveEntryPhase(existingPhase?: string | null): PositionPhase {
-  return existingPhase === "initial" ? "full" : "initial";
+  if (existingPhase === "initial" || existingPhase === "partial_tp") return "full";
+  return "initial";
 }
 
-export function resolveEntryBuyRatio(existingPhase?: string | null): number {
-  return existingPhase === "initial" ? 1 : 0.5;
+export function resolveRecoveredEntryPhase(existingPhase?: string | null): PositionPhase {
+  if (existingPhase === "partial_tp") return "full";
+  if (existingPhase === "full") return "full";
+  if (existingPhase === "final_tp") return "final_tp";
+  return "initial";
 }
 
-export function isFinalTakeProfitPhase(phase?: string | null): boolean {
-  return phase === "final_tp";
+export function canReenterPosition(existingPhase?: string | null): boolean {
+  return existingPhase === "initial" || existingPhase === "partial_tp";
+}
+
+export function shouldAllowStopLossReentry(params: {
+  currentPrice: number;
+  stopPrice?: number | null;
+  raw: Pick<SignalRaw, "ma5" | "ma20" | "ema5" | "ema20" | "macd" | "macdSignal" | "rsi">;
+}): boolean {
+  const stopPrice = Number(params.stopPrice) || 0;
+  if (!(stopPrice > 0) || !(params.currentPrice > 0)) return false;
+
+  const recoveredAboveStop = params.currentPrice >= stopPrice;
+  const movingAverageRecovery = params.raw.ma5 > params.raw.ma20 && params.raw.ema5 >= params.raw.ema20;
+  const momentumRecovery = params.raw.macd >= params.raw.macdSignal;
+  const notOverheated = params.raw.rsi < 72;
+
+  return recoveredAboveStop && movingAverageRecovery && momentumRecovery && notOverheated;
 }
 
 export function resolvePartialExitPhase(params: {
@@ -46,12 +79,12 @@ export function resolvePartialExitPhase(params: {
   isSmallPosition: boolean;
 }): { nextPhase: PositionPhase; phaseLabel: string } {
   if (params.isSmallPosition) {
-    return { nextPhase: "final_tp", phaseLabel: "전량 익절" };
+    return { nextPhase: "final_tp", phaseLabel: "전량 트레일링 청산" };
   }
   if ((params.currentPhase ?? "initial") === "initial") {
-    return { nextPhase: "partial_tp", phaseLabel: "1차 익절" };
+    return { nextPhase: "partial_tp", phaseLabel: "1차 트레일링 청산" };
   }
-  return { nextPhase: "final_tp", phaseLabel: "2차 익절" };
+  return { nextPhase: "final_tp", phaseLabel: "전량 트레일링 청산" };
 }
 
 export function buildPositionOpenPayload(params: {
@@ -67,6 +100,13 @@ export function buildPositionOpenPayload(params: {
     strategyKey?: StrategyKey;
     allocationPct?: number;
     sourceStrategy?: string;
+    entryTag?: string;
+    newsKeywords?: string[];
+    newsScore?: number;
+    learningRiskEnabled?: boolean;
+    directOrderNote?: string | null;
+    directOrderMarket?: string | null;
+    directOrderProfileId?: string | null;
   };
 
   return {
@@ -82,6 +122,13 @@ export function buildPositionOpenPayload(params: {
       strategyKey: strategySignal.strategyKey ?? null,
       allocationPct: strategySignal.allocationPct ?? null,
       sourceStrategy: strategySignal.sourceStrategy ?? null,
+      entryTag: strategySignal.entryTag ?? null,
+      newsKeywords: strategySignal.newsKeywords ?? [],
+      newsScore: strategySignal.newsScore ?? null,
+      learningRiskEnabled: strategySignal.learningRiskEnabled ?? null,
+      directOrderNote: strategySignal.directOrderNote ?? null,
+      directOrderMarket: strategySignal.directOrderMarket ?? null,
+      directOrderProfileId: strategySignal.directOrderProfileId ?? null,
     },
     signal_strength: params.signal.strength,
     phase: params.phase,
@@ -138,4 +185,3 @@ export function buildTradeMemoryClosePayload(params: {
     closed_at: new Date().toISOString(),
   };
 }
-

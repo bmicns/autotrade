@@ -1,6 +1,7 @@
 import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 import { KIS_API_BASE } from "@/lib/constants";
+import { readEngineControlSnapshot } from "@/lib/engine/control";
 import { runBacktest } from "@/lib/backtest";
 import type { DailyCandle } from "@/lib/kis/indicators";
 
@@ -17,12 +18,16 @@ export async function POST(req: NextRequest) {
     if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
 
     const body = await req.json();
+    const { data: appConfigRows } = await supabase.from("app_config").select("key, value");
+    const cfgMap = new Map((appConfigRows ?? []).map((row: { key: string; value: unknown }) => [row.key, row.value]));
+    const control = readEngineControlSnapshot(cfgMap);
     const {
       stockCode,
       stockName,
-      stopLoss = -5,
-      takeProfit = 5,
-      trailingStop = -3,
+      stopLoss = -Math.abs(control.stop_loss),
+      trailingStop = -Math.abs(control.trailing_stop),
+      partialExitRatio = control.partial_exit_ratio,
+      maxHoldDays = control.max_hold_days,
       maxPerTrade = 1000000,
     } = body;
 
@@ -54,8 +59,9 @@ export async function POST(req: NextRequest) {
       candles,
       initialCash: maxPerTrade,
       stopLoss,
-      takeProfit,
       trailingStop,
+      partialExitRatio,
+      maxHoldDays,
       maxPerTrade,
     });
 

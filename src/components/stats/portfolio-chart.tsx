@@ -16,7 +16,7 @@ export function PortfolioChart() {
 
   useEffect(() => {
     fetch("/api/portfolio-snapshot")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : { snapshots: [] }))
       .then((d) => { if (Array.isArray(d.snapshots)) setSnapshots(d.snapshots); })
       .catch(() => {})
       .finally(() => setLoading(false));

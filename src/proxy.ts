@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { hasTrustedOrigin, isSafeHttpMethod } from "@/lib/request-guard";
 
 // 크론 전용 라우트 — CRON_SECRET Bearer로 인증, 세션 검증 생략
 const CRON_ROUTES = new Set([
@@ -6,6 +7,7 @@ const CRON_ROUTES = new Set([
   "/api/daily-report",
   "/api/market-close",
   "/api/observer",
+  "/api/learn",
 ]);
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login"];
@@ -54,6 +56,12 @@ export async function proxy(req: NextRequest) {
   // 공개 경로 통과
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
+  }
+
+  if (pathname.startsWith("/api/") && !isSafeHttpMethod(req.method)) {
+    if (!hasTrustedOrigin(req.headers, req.url)) {
+      return NextResponse.json({ error: "Forbidden origin" }, { status: 403 });
+    }
   }
 
   // 세션 쿠키 검증

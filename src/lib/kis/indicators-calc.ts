@@ -156,28 +156,24 @@ export function calcADX(candles: DailyCandle[], period = 14): number {
 // ─── ATR 배수 인터페이스 ──────────────────────────
 export interface AtrMultipliers {
   stop: number;
-  profit: number;
   trailing: number;
 }
 
 export const DEFAULT_ATR_MULTIPLIERS: AtrMultipliers = {
   stop: 2.0,
-  profit: 3.0,
   trailing: 1.5,
 };
 
-// ─── ATR 기반 동적 손절/익절 계산 ─────────────────
+// ─── ATR 기반 동적 손절/트레일링 계산 ─────────────
 export function calcDynamicRisk(
   atr: number,
   currentPrice: number,
   multipliers: AtrMultipliers = DEFAULT_ATR_MULTIPLIERS
 ) {
   const stopLossPercent = currentPrice > 0 ? -((atr * multipliers.stop) / currentPrice) * 100 : -5;
-  const takeProfitPercent = currentPrice > 0 ? ((atr * multipliers.profit) / currentPrice) * 100 : 5;
   const trailingPercent = currentPrice > 0 ? -((atr * multipliers.trailing) / currentPrice) * 100 : -3;
   return {
     stopLoss: Math.min(stopLossPercent, -2),
-    takeProfit: Math.max(takeProfitPercent, 3),
     trailingStop: Math.min(trailingPercent, -1.5),
   };
 }

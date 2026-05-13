@@ -14,7 +14,6 @@ export interface LearningSnapshot {
   weights_ranging: Record<string, number> | null;
   weights_source: string;
   atr_mult_stop: number;
-  atr_mult_profit: number;
   atr_mult_trailing: number;
   atr_source: string;
   target_risk_amount: number;
@@ -32,6 +31,17 @@ interface LearningSectionProps {
   history: LearningSnapshot[];
   abStats?: { avgBase: number; avgLearned: number; sampleSize: number };
   tradeMemoryCount?: number;
+  datasetSummary?: {
+    sampleCount: number;
+    winRate: number;
+    avgPnl: number;
+    avgHoldDays: number;
+    strategyStats: Array<{ key: string; count: number; winRate: number; avgPnl: number; stopLossRate: number }>;
+    surgeEntryStats: Array<{ tag: string; count: number; winRate: number; avgPnl: number; stopLossRate: number }>;
+    timeBucketStats: Array<{ bucket: string; count: number; winRate: number; avgPnl: number; stopLossRate: number }>;
+    keywordStats: Array<{ keyword: string; count: number; winRate: number; avgPnl: number; stopLossRate: number }>;
+    riskHints: Array<{ label: string; count: number; winRate: number; stopLossRate: number; avgPnl: number; reason: string }>;
+  };
 }
 
 const CONF_LABELS: Record<string, { label: string; color: string; bg: string }> = {
@@ -47,7 +57,21 @@ const BASE_WEIGHTS = {
   ranging:  { RSI: 21, MACD: 13, 이동평균: 13, 볼린저: 21, 거래량: 17, 캔들패턴: 15 },
 };
 
-export function LearningSection({ snapshot, isExpired, history, abStats, tradeMemoryCount }: LearningSectionProps) {
+const STRATEGY_LABELS: Record<string, string> = {
+  watchlist_pullback: "관심종목",
+  surge_momentum: "급등주",
+  institutional_follow: "기관추종",
+  unclassified: "미분류",
+};
+
+const ENTRY_TAG_LABELS: Record<string, string> = {
+  surge_early_entry: "선캐치",
+  surge_reentry: "재진입",
+  surge_standard_entry: "일반진입",
+  unknown: "미분류",
+};
+
+export function LearningSection({ snapshot, isExpired, history, abStats, tradeMemoryCount, datasetSummary }: LearningSectionProps) {
   const [activeRegime, setActiveRegime] = useState<"trending" | "ranging">("trending");
   const [triggering, setTriggering] = useState(false);
   const [triggerMsg, setTriggerMsg] = useState<string | null>(null);
@@ -127,6 +151,93 @@ export function LearningSection({ snapshot, isExpired, history, abStats, tradeMe
         </div>
       )}
 
+      {datasetSummary && datasetSummary.sampleCount > 0 && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "0 16px 12px" }}>
+            {[
+              { label: "학습 샘플", value: `${datasetSummary.sampleCount}건`, sub: "전체 성공/실패 거래" },
+              { label: "샘플 승률", value: `${datasetSummary.winRate.toFixed(1)}%`, sub: `평균 ${datasetSummary.avgPnl >= 0 ? "+" : ""}${Math.round(datasetSummary.avgPnl).toLocaleString("ko-KR")}원` },
+              { label: "평균 보유", value: `${datasetSummary.avgHoldDays.toFixed(1)}일`, sub: "포지션 전체 기준" },
+              { label: "리스크 힌트", value: `${datasetSummary.riskHints.length}개`, sub: "승률/손절률 기반" },
+            ].map((card) => (
+              <div key={card.label} style={{ background: "#F8FAFC", borderRadius: 10, padding: "10px 12px", border: `1px solid ${COLORS.line}` }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: COLORS.dim }}>{card.label}</span>
+                <div style={{ marginTop: 5 }}>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: COLORS.ink }}>{card.value}</span>
+                </div>
+                <div style={{ marginTop: 2 }}>
+                  <span style={{ fontSize: 10, color: COLORS.dim }}>{card.sub}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {datasetSummary.riskHints.length > 0 && (
+            <div style={{ margin: "0 16px 12px", padding: "12px 14px", borderRadius: 10, background: "#FEF2F2", border: "1px solid #FECACA" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#B91C1C", marginBottom: 8 }}>학습 리스크 힌트</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {datasetSummary.riskHints.slice(0, 5).map((item) => (
+                  <div key={`${item.reason}-${item.label}`} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <span style={{ fontSize: 11, color: COLORS.ink }}>{item.reason} · {STRATEGY_LABELS[item.label] || ENTRY_TAG_LABELS[item.label] || item.label}</span>
+                    <span style={{ fontSize: 10, color: "#B91C1C" }}>
+                      {item.count}건 · 승률 {item.winRate.toFixed(0)}% · 손절 {item.stopLossRate.toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ margin: "0 16px 12px", padding: "12px 14px", borderRadius: 10, background: COLORS.sub, border: `1px solid ${COLORS.line}` }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.dim, marginBottom: 10 }}>학습 샘플 분해</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.dim, marginBottom: 6 }}>전략</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {datasetSummary.strategyStats.slice(0, 4).map((item) => (
+                    <div key={item.key} style={{ fontSize: 10, color: COLORS.mid }}>
+                      {STRATEGY_LABELS[item.key] || item.key} · {item.count}건 · {item.winRate.toFixed(0)}%
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.dim, marginBottom: 6 }}>급등주 진입</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {datasetSummary.surgeEntryStats.slice(0, 4).map((item) => (
+                    <div key={item.tag} style={{ fontSize: 10, color: COLORS.mid }}>
+                      {ENTRY_TAG_LABELS[item.tag] || item.tag} · {item.count}건 · {item.winRate.toFixed(0)}%
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.dim, marginBottom: 6 }}>시간대</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {datasetSummary.timeBucketStats.slice(0, 4).map((item) => (
+                    <div key={item.bucket} style={{ fontSize: 10, color: COLORS.mid }}>
+                      {item.bucket} · {item.count}건 · {item.winRate.toFixed(0)}%
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {datasetSummary.keywordStats.length > 0 && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${COLORS.line}` }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.dim, marginBottom: 6 }}>뉴스 키워드</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {datasetSummary.keywordStats.slice(0, 6).map((item) => (
+                    <div key={item.keyword} style={{ fontSize: 10, color: COLORS.mid, padding: "4px 8px", borderRadius: 999, background: "#fff", border: `1px solid ${COLORS.line}` }}>
+                      {item.keyword} · {item.count}건 · {item.winRate.toFixed(0)}%
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       {!snapshot ? (
         <div style={{ padding: "20px", textAlign: "center" }}>
           <span style={{ fontSize: 13, color: COLORS.dim }}>학습 데이터 없음 (매주 월요일 자동 학습)</span>
@@ -138,7 +249,7 @@ export function LearningSection({ snapshot, isExpired, history, abStats, tradeMe
             {[
               { label: "마지막 학습", value: lastLearnedText, sub: `샘플 ${snapshot.sample_size}건` },
               { label: "학습 승률", value: `${snapshot.win_rate?.toFixed(1) ?? "—"}%`, sub: `평균 수익 ${snapshot.avg_win?.toFixed(2) ?? "—"}%` },
-              { label: "익절 비율", value: `${snapshot.take_profit_ratio ?? 50}%`, sub: snapshot.atr_source === "learned" ? "학습값" : "기본값" },
+              { label: "부분청산 비율", value: `${snapshot.take_profit_ratio ?? 50}%`, sub: snapshot.atr_source === "learned" ? "학습값" : "기본값" },
             ].map((card, i) => (
               <div key={i} style={{ background: COLORS.sub, borderRadius: 10, padding: "10px 12px", border: `1px solid ${COLORS.line}` }}>
                 <span style={{ fontSize: 10, fontWeight: 600, color: COLORS.dim }}>{card.label}</span>
@@ -167,7 +278,6 @@ export function LearningSection({ snapshot, isExpired, history, abStats, tradeMe
             </div>
             {[
               { label: "손절", value: snapshot.atr_mult_stop ?? 2.0, base: 2.0 },
-              { label: "익절", value: snapshot.atr_mult_profit ?? 3.0, base: 3.0 },
               { label: "트레일링", value: snapshot.atr_mult_trailing ?? 1.5, base: 1.5 },
             ].map((row) => (
               <div key={row.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>

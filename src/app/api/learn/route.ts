@@ -1,6 +1,7 @@
 import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 import { runLearning } from "@/lib/learning";
+import { buildLearningDatasetSummary } from "@/lib/learning-engine";
 
 
 // GET /api/learn?history=N&recentTrades=N — 학습 결과 조회
@@ -57,10 +58,13 @@ export async function GET(req: NextRequest) {
       .from("trade_memory")
       .select("id", { count: "exact", head: true });
 
+    const datasetSummary = await buildLearningDatasetSummary(180);
+
     return NextResponse.json({
       snapshot: active ?? null,
       isExpired,
       tradeMemoryCount: tradeMemoryCount ?? 0,
+      datasetSummary,
       ...(history !== undefined ? { history } : {}),
       ...(abStats !== undefined ? { abStats } : {}),
     });

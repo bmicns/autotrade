@@ -46,6 +46,7 @@ export async function fetchPrice(config: KISConfig, stockCode: string): Promise<
         appSecret: config.appSecret,
         token: config.token || "",
         accountNo: config.accountNo,
+        accountProductCode: config.accountProductCode || "01",
       }),
     });
     if (!res.ok) return null;
@@ -93,6 +94,7 @@ export async function fetchBalance(config: KISConfig): Promise<BalanceResult | n
         appSecret: config.appSecret,
         token: config.token || "",
         accountNo: config.accountNo,
+        accountProductCode: config.accountProductCode || "01",
       }),
     });
     if (!res.ok) return null;

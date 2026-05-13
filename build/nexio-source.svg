@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="256" y2="256">
+      <stop offset="0%" stop-color="#0B0B0F"></stop>
+      <stop offset="100%" stop-color="#111827"></stop>
+    </linearGradient>
+
+    <linearGradient id="flow" x1="64" y1="64" x2="192" y2="192">
+      <stop offset="0%" stop-color="#A78BFA"></stop>
+      <stop offset="100%" stop-color="#F472B6"></stop>
+    </linearGradient>
+  </defs>
+
+  <!-- background -->
+  <rect width="256" height="256" rx="64" fill="url(#bg)"></rect>
+
+  <!-- diagonal flow (핵심) -->
+  <rect x="60" y="120" width="140" height="28" rx="14" transform="rotate(-45 128 128)" fill="url(#flow)"></rect>
+
+  <!-- subtle accent -->
+  <rect x="90" y="120" width="80" height="10" rx="5" transform="rotate(-45 128 128)" fill="white" opacity="0.25"></rect>
+</svg>

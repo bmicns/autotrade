@@ -32,14 +32,14 @@ async function resolveObserverKisCredentials(): Promise<
 
   const failures: string[] = [];
   for (const candidate of candidates) {
-    const tokenResult = await issueKisToken(candidate.config.appKey, candidate.config.appSecret);
-    if (tokenResult.ok) {
-      if (candidate.source === "env") {
-        await persistKisConfig(candidate.config);
+      const tokenResult = await issueKisToken(candidate.config.appKey, candidate.config.appSecret);
+      if (tokenResult.ok) {
+        if (candidate.source === "env") {
+        await persistKisConfig(candidate.config, candidate.profileId);
       }
-      return {
-        ok: true,
-        appKey: candidate.config.appKey,
+        return {
+          ok: true,
+          appKey: candidate.config.appKey,
         appSecret: candidate.config.appSecret,
         token: tokenResult.token,
       };

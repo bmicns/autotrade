@@ -72,9 +72,19 @@ test("snapshot builder assembles runtime state and summary from rows", () => {
 
   assert.equal(snapshot.summary.openPositionCount, 1);
   assert.equal(snapshot.summary.pendingOrderCount, 1);
+  assert.equal(snapshot.summary.pendingOrderStaleCount, 1);
   assert.equal(snapshot.summary.pendingSignalCount, 1);
+  assert.equal(snapshot.summary.recentPartialFillCount, 0);
+  assert.equal(snapshot.summary.recentLifecycleRiskCount, 0);
+  assert.equal(snapshot.summary.recentManualOrderCount, 0);
+  assert.equal(snapshot.summary.recentTimeoutCleanupCount, 0);
+  assert.equal(snapshot.summary.recentOrderFailureCount, 0);
+  assert.equal(snapshot.summary.todayTradeCount, 0);
+  assert.equal(snapshot.summary.todayRealizedPnl, 0);
   assert.equal(snapshot.recentEvents[0].eventType, "position_opened");
   assert.equal(snapshot.openPositions[0].strategyKey, "watchlist_pullback");
+  assert.equal(snapshot.runtime.engineEnabled, true);
+  assert.equal(snapshot.runtime.engineLocked, false);
 });
 
 test("snapshot scope selector splits active vs history signals", () => {
@@ -91,4 +101,32 @@ test("snapshot scope selector splits active vs history signals", () => {
 
   assert.deepEqual(selectPendingSignalsForScope(snapshot, "active").map((signal) => signal.stockCode), ["A", "C"]);
   assert.deepEqual(selectPendingSignalsForScope(snapshot, "history").map((signal) => signal.stockCode), ["B"]);
+});
+
+test("snapshot builder keeps injected operational summary metrics", () => {
+  const snapshot = buildEngineStateSnapshotFromRows({
+    positions: [],
+    orders: [],
+    signals: [],
+    events: [],
+    summary: {
+      pendingOrderStaleCount: 0,
+      recentPartialFillCount: 0,
+      recentLifecycleRiskCount: 2,
+      recentManualOrderCount: 1,
+      recentTimeoutCleanupCount: 0,
+      recentOrderFailureCount: 0,
+      todayTradeCount: 3,
+      todayRealizedPnl: -12500,
+    },
+  });
+
+  assert.equal(snapshot.summary.pendingOrderStaleCount, 0);
+  assert.equal(snapshot.summary.recentPartialFillCount, 0);
+  assert.equal(snapshot.summary.recentLifecycleRiskCount, 2);
+  assert.equal(snapshot.summary.recentManualOrderCount, 1);
+  assert.equal(snapshot.summary.recentTimeoutCleanupCount, 0);
+  assert.equal(snapshot.summary.recentOrderFailureCount, 0);
+  assert.equal(snapshot.summary.todayTradeCount, 3);
+  assert.equal(snapshot.summary.todayRealizedPnl, -12500);
 });

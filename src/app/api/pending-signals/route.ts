@@ -1,6 +1,8 @@
 import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
+import { getEngineLockState, isEngineEnabled } from "@/lib/engine/app-config";
 import { readEngineStateSnapshot, selectPendingSignalsForScope } from "@/lib/engine/snapshot";
+import { apiCacheHeaders } from "@/lib/http-cache";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUUID(v: unknown): v is string { return typeof v === "string" && UUID_RE.test(v); }
@@ -9,33 +11,58 @@ function isUUID(v: unknown): v is string { return typeof v === "string" && UUID_
 // GET: 대기 중인 신호 목록
 export async function GET(req: NextRequest) {
   const supabaseError = getSupabaseConfigError();
-  if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+  if (supabaseError) {
+    return NextResponse.json({ error: supabaseError }, { status: 503, headers: apiCacheHeaders.realtime });
+  }
 
   const scope = req.nextUrl.searchParams.get("scope") ?? "active";
   const snapshot = await readEngineStateSnapshot();
   const signals = selectPendingSignalsForScope(snapshot, scope === "history" ? "history" : "active");
-  return NextResponse.json(signals.map((signal) => ({
-    id: signal.id,
-    stock_code: signal.stockCode,
-    stock_name: signal.stockName,
-    status: signal.status,
-    signal_score: signal.score,
-    signal_comment: signal.comment,
-    source: signal.source,
-    created_at: signal.createdAt,
-    resolved_at: signal.resolvedAt,
-    signal_data: signal.signalData,
-  })));
+  return NextResponse.json(
+    signals.map((signal) => ({
+      id: signal.id,
+      stock_code: signal.stockCode,
+      stock_name: signal.stockName,
+      status: signal.status,
+      signal_score: signal.score,
+      signal_comment: signal.comment,
+      source: signal.source,
+      created_at: signal.createdAt,
+      resolved_at: signal.resolvedAt,
+      signal_data: signal.signalData,
+    })),
+    { headers: apiCacheHeaders.realtime },
+  );
 }
 
 // POST: 신호 승인/거부
 export async function POST(req: NextRequest) {
   const supabaseError = getSupabaseConfigError();
-  if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+  if (supabaseError) {
+    return NextResponse.json({ error: supabaseError }, { status: 503, headers: apiCacheHeaders.realtime });
+  }
 
   const { id, action } = await req.json();
   if (!isUUID(id) || !["approved", "rejected"].includes(action)) {
-    return NextResponse.json({ error: "id(UUID)와 action(approved/rejected) 필수" }, { status: 400 });
+    return NextResponse.json(
+      { error: "id(UUID)와 action(approved/rejected) 필수" },
+      { status: 400, headers: apiCacheHeaders.realtime },
+    );
+  }
+  if (action === "approved" && !(await isEngineEnabled())) {
+    return NextResponse.json(
+      { error: "비상 정지 활성 상태에서는 승인 매수를 진행할 수 없습니다" },
+      { status: 409, headers: apiCacheHeaders.realtime },
+    );
+  }
+  if (action === "approved") {
+    const lockState = await getEngineLockState();
+    if (lockState.locked) {
+      return NextResponse.json(
+        { error: "엔진 실행 중에는 승인 매수를 진행할 수 없습니다" },
+        { status: 409, headers: apiCacheHeaders.realtime },
+      );
+    }
   }
 
   // approved: resolved_at 없이 상태만 변경 (매수 성공 시 expired로 전환)
@@ -51,18 +78,23 @@ export async function POST(req: NextRequest) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500, headers: apiCacheHeaders.realtime });
+  return NextResponse.json(data, { headers: apiCacheHeaders.realtime });
 }
 
 // PATCH: 즉시매수 성공 후 expired 전환
 export async function PATCH(req: NextRequest) {
   const supabaseError = getSupabaseConfigError();
-  if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
+  if (supabaseError) {
+    return NextResponse.json({ error: supabaseError }, { status: 503, headers: apiCacheHeaders.realtime });
+  }
 
   const { id, status } = await req.json();
   if (!isUUID(id) || status !== "expired") {
-    return NextResponse.json({ error: "id(UUID)와 status=expired 필수" }, { status: 400 });
+    return NextResponse.json(
+      { error: "id(UUID)와 status=expired 필수" },
+      { status: 400, headers: apiCacheHeaders.realtime },
+    );
   }
 
   const { data, error } = await supabase
@@ -72,6 +104,6 @@ export async function PATCH(req: NextRequest) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500, headers: apiCacheHeaders.realtime });
+  return NextResponse.json(data, { headers: apiCacheHeaders.realtime });
 }

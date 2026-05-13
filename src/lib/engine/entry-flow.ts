@@ -2,7 +2,7 @@ import { supabase } from "@/lib/supabase/api-client";
 import { recordTradeMemory, savePendingOrder } from "@/lib/engine/db";
 import { sendTradeAlert } from "@/lib/engine/notify";
 import type { StrategyKey } from "@/lib/engine/strategies";
-import type { MarketTrend, OrderResult, StepContext } from "@/lib/engine/types";
+import type { OrderResult, StepContext } from "@/lib/engine/types";
 import type { SignalResult } from "@/lib/kis/indicators";
 
 export function sleepRateLimit(ms = 200): Promise<void> {
@@ -21,12 +21,12 @@ export async function recordSuccessfulEntry(params: {
   result: OrderResult & { limitPrice: number };
   adjustedScore: number;
   strategyKey: StrategyKey;
-  marketTrend: MarketTrend;
+  entryTag?: string | null;
+  signalContext?: Record<string, unknown> | null;
   baseSignal: SignalResult;
   learnedSignal: SignalResult;
   bonuses: { market: number; investor: number; snapshot: number };
 }) {
-  void params.marketTrend;
   await savePendingOrder({
     stock_code: params.code,
     stock_name: params.name,
@@ -35,6 +35,8 @@ export async function recordSuccessfulEntry(params: {
     limit_price: params.result.limitPrice,
     signal_score: params.adjustedScore,
     strategy_key: params.strategyKey,
+    entry_tag: params.entryTag ?? null,
+    signal_context: params.signalContext ?? null,
   });
   await sendTradeAlert({
     type: params.strategyKey === "surge_momentum" ? "surge_buy" : "buy",
@@ -57,7 +59,6 @@ export async function recordSuccessfulEntry(params: {
     positionSize: params.qty * params.result.limitPrice,
     entryPrice: params.result.limitPrice,
     stopLossPct: params.ctx.config.stopLoss,
-    takeProfitPct: params.ctx.config.takeProfit,
   });
 }
 
@@ -72,6 +73,9 @@ export async function queuePendingSignal(params: {
   allocationPct: number;
   openingBonus?: number;
   institutionalBonus?: number;
+  newsKeywords?: string[];
+  newsScore?: number;
+  learningRiskEnabled?: boolean;
 }) {
   try {
     await supabase.from("pending_signals").insert({
@@ -85,6 +89,9 @@ export async function queuePendingSignal(params: {
         matchCount: params.signal.matchCount,
         openingBonus: params.openingBonus,
         institutionalBonus: params.institutionalBonus,
+        newsKeywords: params.newsKeywords ?? [],
+        newsScore: params.newsScore ?? null,
+        learningRiskEnabled: params.learningRiskEnabled ?? null,
         strategyKey: params.strategyKey,
         allocationPct: params.allocationPct,
       },

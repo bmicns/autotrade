@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { COLORS } from "@/lib/constants";
 import { useAppStore } from "@/lib/store";
 import { Icon } from "@/components/ui/icons";
@@ -14,7 +16,21 @@ const TABS = [
 ];
 
 export function SideBar() {
+  const router = useRouter();
   const { tab, setTab, pendingCount } = useAppStore();
+
+  const navigate = (nextTab: typeof TABS[number]["id"]) => {
+    setTab(nextTab);
+    if (nextTab === "stats") {
+      router.push("/stats");
+      return;
+    }
+    if (nextTab === "settings") {
+      router.push("/settings");
+      return;
+    }
+    router.push("/");
+  };
 
   return (
     <div
@@ -35,7 +51,7 @@ export function SideBar() {
           return (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => navigate(t.id)}
               className="relative flex w-full items-center gap-2.5 border-none py-2"
               style={{ background: "transparent" }}
             >

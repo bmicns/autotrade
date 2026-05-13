@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "check:engine": "node scripts/check-engine.cjs",
-    "test:unit": "tsc -p tests/tsconfig.unit.json && node --test .tmp-tests/tests/unit/**/*.test.js"
+    "test:unit": "node -e \"require('node:fs').rmSync('.tmp-tests', { recursive: true, force: true })\" && tsc -p tests/tsconfig.unit.json && node --test .tmp-tests/tests/unit/**/*.test.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",

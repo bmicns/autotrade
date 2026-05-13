@@ -35,7 +35,7 @@ export function useKISBalance() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchBalance = useCallback(async () => {
-    const { appKey, appSecret, token, accountNo } = kisConfig;
+    const { appKey, appSecret, token, accountNo, accountProductCode } = kisConfig;
     if (!appKey || !appSecret || !accountNo) return;
 
     setLoading(true);
@@ -44,7 +44,7 @@ export function useKISBalance() {
       const res = await fetch("/api/kis/balance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ appKey, appSecret, token: token ?? "", accountNo }),
+        body: JSON.stringify({ appKey, appSecret, token: token ?? "", accountNo, accountProductCode: accountProductCode || "01" }),
       });
       const json = await res.json();
 

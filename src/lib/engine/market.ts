@@ -1,6 +1,8 @@
 // ─── 시장/투자자 동향 함수 ───────────────────────
 import { KIS_API_BASE, KIS_TR } from "@/lib/constants";
-import { type EngineConfig, type MarketTrend, type InvestorTrend } from "./types";
+import { KIS_RATE_LIMIT_DELAY_MS } from "./constants";
+import { shouldRetryKisRequest, shouldRetryRateLimit } from "./kis-rate-limit";
+import { type EngineConfig, type MarketTrend, type InvestorTrend, type SurgeScanDiagnostic, type SurgeScanMarketDiagnostic } from "./types";
 import { headers } from "./kis";
 import { MARKET_BONUS_STRONG, MARKET_BONUS_MILD, MARKET_PENALTY_MILD, MARKET_PENALTY_STRONG, INVESTOR_BONUS_BOTH, INVESTOR_BONUS_ORGN, INVESTOR_BONUS_FRGN, INVESTOR_PENALTY_BOTH, INVESTOR_PENALTY_ORGN, INVESTOR_PENALTY_FRGN } from "@/lib/engine/constants";
 
@@ -158,55 +160,174 @@ export async function scanInstitutionalBuys(
 }
 
 // ─── #6 급등주 탐색 (KOSPI + KOSDAQ) ────────────
-export async function scanSurgeStocks(config: EngineConfig): Promise<string[]> {
-  const codes = new Set<string>();
-  const markets = ["J", "Q"]; // J=KOSPI, Q=KOSDAQ (#6)
+export interface SurgeCandidate {
+  code: string;
+  name: string;
+}
 
-  for (const mkt of markets) {
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function truncateErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message.slice(0, 120) : "unknown error";
+}
+
+function getKisMessage(payload: Record<string, unknown>, fallback: string): string {
+  const raw = payload.msg1 ?? payload.msg ?? payload.error_description ?? payload.error;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : fallback;
+}
+
+function getKisCode(payload: Record<string, unknown>): string | undefined {
+  const raw = payload.msg_cd ?? payload.error_code ?? payload.rt_cd ?? payload.error;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+}
+
+function formatKisPayloadError(payload: Record<string, unknown>, fallback: string): string {
+  const code = getKisCode(payload);
+  const message = getKisMessage(payload, fallback);
+  return code ? `[${code}] ${message}` : message;
+}
+
+async function fetchRankingOutput(
+  config: EngineConfig,
+  path: string,
+  trId: string,
+  params: URLSearchParams,
+): Promise<{ output: Record<string, string>[]; error?: string }> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${KIS_API_BASE}${path}?${params}`, {
+        headers: headers(config, trId),
+      });
+      const text = await res.text();
+      const payload = text ? JSON.parse(text) as Record<string, unknown> : {};
+      const detail = formatKisPayloadError(payload, `HTTP ${res.status}`);
+
+      if (!res.ok) {
+        if (attempt === 0 && shouldRetryKisRequest(detail, res.status)) {
+          await sleep(shouldRetryRateLimit(detail) ? KIS_RATE_LIMIT_DELAY_MS * 6 : KIS_RATE_LIMIT_DELAY_MS * 2);
+          continue;
+        }
+        return { output: [], error: detail };
+      }
+
+      const output = Array.isArray(payload.output)
+        ? payload.output.filter((item): item is Record<string, string> => Boolean(item && typeof item === "object"))
+        : [];
+
+      if (output.length > 0) {
+        return { output };
+      }
+
+      if (payload.rt_cd === "0" || payload.msg_cd === "OPSQ0000") {
+        return { output: [] };
+      }
+
+      if (attempt === 0 && shouldRetryKisRequest(detail, res.status)) {
+        await sleep(shouldRetryRateLimit(detail) ? KIS_RATE_LIMIT_DELAY_MS * 6 : KIS_RATE_LIMIT_DELAY_MS * 2);
+        continue;
+      }
+
+      return { output: [], error: detail };
+    } catch (error: unknown) {
+      const detail = truncateErrorMessage(error);
+      if (attempt === 0) {
+        await sleep(KIS_RATE_LIMIT_DELAY_MS * 2);
+        continue;
+      }
+      return { output: [], error: detail };
+    }
+  }
+
+  return { output: [], error: "retry exhausted" };
+}
+
+export async function scanSurgeStocks(config: EngineConfig): Promise<{ candidates: SurgeCandidate[]; diagnostic: SurgeScanDiagnostic }> {
+  const candidates = new Map<string, string>();
+  const markets = [
+    { diagnosticMarket: "J" as const, inputIscd: "0001" },
+    { diagnosticMarket: "Q" as const, inputIscd: "1001" },
+  ];
+  const marketDiagnostics: SurgeScanMarketDiagnostic[] = [];
+
+  for (const market of markets) {
+    const marketDiagnostic: SurgeScanMarketDiagnostic = {
+      market: market.diagnosticMarket,
+      fluctuationCount: 0,
+      volumeCount: 0,
+    };
     // 등락률 상위
     try {
       const params = new URLSearchParams({
-        fid_cond_mrkt_div_code: mkt, fid_cond_scr_div_code: "20170",
-        fid_input_iscd: mkt === "J" ? "0001" : "1001",
+        fid_cond_mrkt_div_code: "J",
+        fid_cond_scr_div_code: "20170",
+        fid_input_iscd: market.inputIscd,
         fid_rank_sort_cls_code: "0", fid_input_cnt_1: "0", fid_input_cnt_2: "",
+        fid_prc_cls_code: "1",
+        fid_rsfl_rate1: "",
+        fid_rsfl_rate2: "",
         fid_div_cls_code: "0", fid_trgt_cls_code: "0", fid_trgt_exls_cls_code: "0",
         fid_input_price_1: "", fid_input_price_2: "", fid_vol_cnt: "", fid_input_date_1: "",
       });
-      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`, {
-        headers: headers(config, "FHPST01700000"),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        for (const item of (data.output || []).slice(0, 20)) {
+      const result = await fetchRankingOutput(config, "/uapi/domestic-stock/v1/ranking/fluctuation", "FHPST01700000", params);
+      if (result.error) {
+        marketDiagnostic.fluctuationError = result.error;
+      } else {
+        for (const item of result.output.slice(0, 30)) {
           const code = item.stck_shrn_iscd || item.mksc_shrn_iscd;
-          if (code && (Number(item.prdy_ctrt) || 0) >= 3) codes.add(code);
+          const name = item.hts_kor_isnm || code;
+          if (code && (Number(item.prdy_ctrt) || 0) >= 1.5) {
+            candidates.set(code, name);
+            marketDiagnostic.fluctuationCount += 1;
+          }
         }
       }
-    } catch { /* ignore */ }
+    } catch (error: unknown) {
+      marketDiagnostic.fluctuationError = truncateErrorMessage(error);
+    }
+
+    await sleep(KIS_RATE_LIMIT_DELAY_MS);
 
     // 거래량 상위
     try {
       const params = new URLSearchParams({
-        fid_cond_mrkt_div_code: mkt, fid_cond_scr_div_code: "20171",
-        fid_input_iscd: mkt === "J" ? "0001" : "1001",
-        fid_rank_sort_cls_code: "0", fid_input_cnt_1: "0", fid_input_cnt_2: "",
-        fid_div_cls_code: "0", fid_trgt_cls_code: "0", fid_trgt_exls_cls_code: "0",
+        fid_cond_mrkt_div_code: "J",
+        fid_cond_scr_div_code: "20171",
+        fid_input_iscd: market.inputIscd,
+        fid_div_cls_code: "0",
+        fid_blng_cls_code: "0",
+        fid_trgt_cls_code: "111111111",
+        fid_trgt_exls_cls_code: "0000000000",
         fid_input_price_1: "", fid_input_price_2: "", fid_vol_cnt: "", fid_input_date_1: "",
       });
-      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/ranking/fluctuation?${params}`, {
-        headers: headers(config, "FHPST01700000"),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        for (const item of (data.output || []).slice(0, 15)) {
+      const result = await fetchRankingOutput(config, "/uapi/domestic-stock/v1/quotations/volume-rank", "FHPST01710000", params);
+      if (result.error) {
+        marketDiagnostic.volumeError = result.error;
+      } else {
+        for (const item of result.output.slice(0, 25)) {
           const code = item.stck_shrn_iscd || item.mksc_shrn_iscd;
-          if (code) codes.add(code);
+          const name = item.hts_kor_isnm || code;
+          if (code) {
+            candidates.set(code, name);
+            marketDiagnostic.volumeCount += 1;
+          }
         }
       }
-    } catch { /* ignore */ }
+    } catch (error: unknown) {
+      marketDiagnostic.volumeError = truncateErrorMessage(error);
+    }
 
-    await new Promise((r) => setTimeout(r, 200));
+    marketDiagnostics.push(marketDiagnostic);
+
+    await sleep(KIS_RATE_LIMIT_DELAY_MS);
   }
 
-  return Array.from(codes);
+  return {
+    candidates: Array.from(candidates, ([code, name]) => ({ code, name })),
+    diagnostic: {
+      totalCandidates: candidates.size,
+      marketDiagnostics,
+    },
+  };
 }

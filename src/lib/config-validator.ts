@@ -1,9 +1,10 @@
 // 필수 환경변수 검증 유틸
-// 엔진 진입부에서 호출되어 런타임 undefined 오류를 조기 감지한다.
+// 엔진/관리자 인증/알림 등 운영 축별 누락을 조기 감지한다.
 
 const REQUIRED_ENV_GROUPS = {
   supabase: ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY"],
-  auth:     ["CRON_SECRET", "ADMIN_SECRET", "ADMIN_PASSWORD"],
+  cron: ["CRON_SECRET"],
+  adminAuth: ["ADMIN_ID", "ADMIN_PASSWORD", "ADMIN_SECRET", "SESSION_SECRET"],
   telegram: ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"],
 } as const;
 
@@ -18,15 +19,22 @@ export interface ConfigValidationResult {
   warnings: string[]; // warn 그룹 누락 (오류 아님, 로그만)
 }
 
-export function validateRequiredEnv(): ConfigValidationResult {
-  const missing: string[] = [];
-  const warnings: string[] = [];
+type RequiredEnvGroup = keyof typeof REQUIRED_ENV_GROUPS;
 
-  for (const keys of Object.values(REQUIRED_ENV_GROUPS)) {
+function collectMissing(groups: readonly RequiredEnvGroup[]): string[] {
+  const missing: string[] = [];
+
+  for (const group of groups) {
+    const keys = REQUIRED_ENV_GROUPS[group];
     for (const key of keys) {
       if (!process.env[key]) missing.push(key);
     }
   }
+  return missing;
+}
+
+function collectWarnings(): string[] {
+  const warnings: string[] = [];
 
   for (const keys of Object.values(WARN_ENV_GROUPS)) {
     for (const key of keys) {
@@ -34,5 +42,17 @@ export function validateRequiredEnv(): ConfigValidationResult {
     }
   }
 
+  return warnings;
+}
+
+export function validateRequiredEnv(): ConfigValidationResult {
+  const missing = collectMissing(["supabase", "cron", "telegram"]);
+  const warnings = collectWarnings();
+
   return { ok: missing.length === 0, missing, warnings };
+}
+
+export function validateAdminAuthEnv(): ConfigValidationResult {
+  const missing = collectMissing(["adminAuth"]);
+  return { ok: missing.length === 0, missing, warnings: [] };
 }

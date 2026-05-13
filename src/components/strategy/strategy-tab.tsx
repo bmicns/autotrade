@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { COLORS } from "@/lib/constants";
 import { useAppStore, TradeSettings } from "@/lib/store";
 import { Icon } from "@/components/ui/icons";
-import { saveTradeSettings, setSignalThresholds } from "@/actions/engine-control";
+import { saveTradeSettings, setSellRuleSensitivity, setSignalThresholds } from "@/actions/engine-control";
 import { TradeEditSheet, SettingKey, SettingMeta } from "./trade-edit-sheet";
 import { SignalEditSheet, SignalThresholds } from "./signal-edit-sheet";
 import { SignalOptimizeSheet } from "./signal-optimize-sheet";
@@ -43,19 +43,17 @@ function calcUncoveredCrons(ts: TradeSettings): string[] {
 
 const SETTING_METAS: SettingMeta[] = [
   { key: "stopLoss",          label: "손절 라인",       icon: "dn",    unit: "%",    type: "number",     min: 1,  max: 20,   step: 0.5, description: "손실 시 자동 매도 기준" },
-  { key: "takeProfit",        label: "1차 익절",        icon: "up",    unit: "%",    type: "number",     min: 1,  max: 50,   step: 0.5, description: "수익 실현 기준 (비율 50%)" },
   { key: "trailingStop",      label: "트레일링 스탑",   icon: "trend", unit: "%",    type: "number",     min: 1,  max: 10,   step: 0.5, description: "고점 대비 하락 시 매도" },
   { key: "dailyLossLimit",    label: "일일 손실 한도",  icon: "dn",    unit: "%",    type: "number",     min: 1,  max: 10,   step: 0.5, description: "당일 손실이 이 비율 초과 시 매매 정지" },
-  { key: "maxHoldDays",       label: "최대 보유 기간",  icon: "clock", unit: "일",   type: "number",     min: 1,  max: 30,   step: 1,   description: "보유 기간 초과 시 강제 청산" },
-  { key: "maxAmountPerTrade", label: "1회 매매 한도",   icon: "trend", unit: "만원", type: "number",     min: 10, max: 1000, step: 10,  description: "1회 최대 투자금" },
+  { key: "maxHoldDays",       label: "최대 보유 기간",  icon: "clock", unit: "일",   type: "number",     min: 1,  max: 30,   step: 1,   description: "비수익 포지션 장기 보유 시 정리" },
   { key: "maxTradesPerDay",   label: "1일 최대 횟수",   icon: "clock", unit: "회",   type: "number",     min: 1,  max: 20,   step: 1,   description: "하루 최대 매매 횟수" },
   { key: "morningSession",    label: "오전 세션",       icon: "clock", unit: "",     type: "time-range",             description: "오전 매매 허용 시간대" },
   { key: "afternoonSession",  label: "오후 세션",       icon: "clock", unit: "",     type: "time-range",             description: "오후 매매 허용 시간대" },
 ];
 
 const GROUPS = [
-  { title: "손익 관리",  keys: ["stopLoss", "takeProfit", "trailingStop", "dailyLossLimit", "maxHoldDays"] },
-  { title: "매매 한도",  keys: ["maxAmountPerTrade", "maxTradesPerDay"] },
+  { title: "손익 관리",  keys: ["stopLoss", "trailingStop", "dailyLossLimit", "maxHoldDays"] },
+  { title: "매매 한도",  keys: ["maxTradesPerDay"] },
   { title: "시간대 필터", keys: ["morningSession", "afternoonSession"] },
 ];
 
@@ -71,10 +69,8 @@ const INDICATORS = [
 
 function getDisplayValue(key: SettingKey, ts: TradeSettings): string {
   switch (key) {
-    case "maxAmountPerTrade":  return `${ts.maxAmountPerTrade}만원`;
     case "maxTradesPerDay":    return `${ts.maxTradesPerDay}회`;
     case "stopLoss":           return `-${ts.stopLoss}%`;
-    case "takeProfit":         return `+${ts.takeProfit}% · ${ts.takeProfitRatio}%`;
     case "trailingStop":       return `고점 -${ts.trailingStop}%`;
     case "dailyLossLimit":     return `-${ts.dailyLossLimit}%`;
     case "maxHoldDays":        return `${ts.maxHoldDays}일`;
@@ -93,7 +89,7 @@ export function StrategyTab() {
 
   const { runs, loading: loadingRuns, fetchEngineLog } = useEngineLog(5);
   const { learning, loading: loadingLearn, fetchLearning } = useLearning();
-  const { thresholds, setThresholds, allocations, holidays, loaded: configLoaded, fetchEngineControl } = useEngineControl();
+  const { thresholds, setThresholds, sellRuleSensitivity, setSellRuleSensitivity: setSellRuleSensitivityLocal, allocations, surgeSettings, holidays, loaded: configLoaded, fetchEngineControl } = useEngineControl();
   const uncoveredCrons = calcUncoveredCrons(tradeSettings);
 
   useEffect(() => {
@@ -106,8 +102,10 @@ export function StrategyTab() {
     const next = { ...tradeSettings, ...partial };
     setTradeSettings(next);
     setEditKey(null);
-    saveTradeSettings(partial).catch(() => {});
-  }, [tradeSettings, setTradeSettings]);
+    saveTradeSettings(partial).catch(() => {
+      fetchEngineControl().catch(() => {});
+    });
+  }, [fetchEngineControl, tradeSettings, setTradeSettings]);
 
   const handleSignalSave = useCallback((partial: Partial<SignalThresholds>) => {
     const next = { ...thresholds, ...partial };
@@ -121,6 +119,13 @@ export function StrategyTab() {
     setOptimizeResult(null);
     setSignalThresholds(recommended).catch(() => {});
   }, [setOptimizeResult, setThresholds]);
+
+  const handleSellRuleSensitivityChange = useCallback((value: number) => {
+    setSellRuleSensitivityLocal(value);
+    setSellRuleSensitivity(value).catch(() => {
+      fetchEngineControl().catch(() => {});
+    });
+  }, [fetchEngineControl, setSellRuleSensitivityLocal]);
 
   const editMeta = editKey ? SETTING_METAS.find((m) => m.key === editKey) : null;
 
@@ -147,6 +152,24 @@ export function StrategyTab() {
           <div style={{ height: 1, background: COLORS.line }} />
         </div>
       ))}
+      <div style={{ padding: "14px 20px", borderBottom: `1px solid ${COLORS.line}` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 500, color: COLORS.ink }}>매도규칙 민감도</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.fall }}>{sellRuleSensitivity}/10</span>
+        </div>
+        <input
+          type="range"
+          min={1}
+          max={10}
+          step={1}
+          value={sellRuleSensitivity}
+          onChange={(e) => handleSellRuleSensitivityChange(Number(e.target.value))}
+          style={{ width: "100%", accentColor: COLORS.fall }}
+        />
+        <div style={{ marginTop: 6, fontSize: 11, color: COLORS.dim }}>
+          높을수록 보유 포지션의 매도규칙이 손절·트레일링보다 먼저, 더 민감하게 반응합니다.
+        </div>
+      </div>
 
       {/* 자동 최적화 */}
       <div style={{ padding: "14px 20px" }}>
@@ -170,6 +193,7 @@ export function StrategyTab() {
       {configLoaded && (
         <StrategyAllocationSection
           initialAllocations={allocations}
+          initialSurgeSettings={surgeSettings}
           initialHolidays={holidays}
         />
       )}

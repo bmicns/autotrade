@@ -22,7 +22,6 @@ export function BacktestSection() {
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [selectedCode, setSelectedCode] = useState("");
   const [stopLoss, setStopLoss] = useState(-5);
-  const [takeProfit, setTakeProfit] = useState(5);
   const [trailingStop, setTrailingStop] = useState(-3);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResultWithLive | null>(null);
@@ -50,7 +49,7 @@ export function BacktestSection() {
         body: JSON.stringify({
           stockCode: selectedCode,
           stockName: item?.name ?? selectedCode,
-          stopLoss, takeProfit, trailingStop,
+          stopLoss, trailingStop,
           maxPerTrade: 1000000,
         }),
       });
@@ -102,17 +101,12 @@ export function BacktestSection() {
             {loading ? "분석 중..." : "실행"}
           </button>
         </div>
-        {/* 2행: 손절 / 익절 / 트레일링 */}
+        {/* 2행: 손절 / 트레일링 */}
         <div style={{ display: "flex", gap: 12 }}>
           <div style={{ flex: 1 }}>
             <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.fall, display: "block", marginBottom: 4 }}>손절 %</label>
             <input type="number" value={stopLoss} onChange={(e) => setStopLoss(Number(e.target.value))}
               style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.fallB}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink, boxSizing: "border-box" }} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.rise, display: "block", marginBottom: 4 }}>익절 %</label>
-            <input type="number" value={takeProfit} onChange={(e) => setTakeProfit(Number(e.target.value))}
-              style={{ width: "100%", padding: "8px 10px", fontSize: 13, border: `1px solid ${COLORS.riseB}`, borderRadius: 8, background: COLORS.bg, color: COLORS.ink, boxSizing: "border-box" }} />
           </div>
           <div style={{ flex: 1 }}>
             <label style={{ fontSize: 11, fontWeight: 600, color: COLORS.fall, display: "block", marginBottom: 4 }}>트레일링 %</label>

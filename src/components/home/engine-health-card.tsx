@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { COLORS } from "@/lib/constants";
 
 interface HealthStatus {
@@ -25,7 +25,7 @@ const STATUS_META: Record<HealthStatus["status"], { label: string; dotColor: str
   unknown: { label: "확인 중", dotColor: COLORS.dim, bg: COLORS.sub, border: COLORS.line, textColor: COLORS.dim },
 };
 
-export function EngineHealthCard() {
+export function EngineHealthCard({ actionSlot }: { actionSlot?: ReactNode }) {
   const [health, setHealth] = useState<HealthStatus | null>(null);
 
   useEffect(() => {
@@ -59,13 +59,16 @@ export function EngineHealthCard() {
           </span>
         )}
       </div>
-      {health.minutesSinceLastRun !== null && (
-        <span style={{ fontSize: 11, fontWeight: 600, color: meta.textColor }}>
-          {health.minutesSinceLastRun < 60
-            ? `${health.minutesSinceLastRun}분 전`
-            : `${Math.floor(health.minutesSinceLastRun / 60)}시간 ${health.minutesSinceLastRun % 60}분 전`}
-        </span>
-      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {actionSlot}
+        {health.minutesSinceLastRun !== null && (
+          <span style={{ fontSize: 11, fontWeight: 600, color: meta.textColor }}>
+            {health.minutesSinceLastRun < 60
+              ? `${health.minutesSinceLastRun}분 전`
+              : `${Math.floor(health.minutesSinceLastRun / 60)}시간 ${health.minutesSinceLastRun % 60}분 전`}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

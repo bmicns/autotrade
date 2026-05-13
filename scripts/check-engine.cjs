@@ -62,6 +62,26 @@ function summarize(value, maxLen = 1200) {
   return text.length > maxLen ? `${text.slice(0, maxLen)}\n...` : text;
 }
 
+function parseTimeoutMs() {
+  const raw = Number(process.env.CHECK_ENGINE_TIMEOUT_MS ?? "15000");
+  if (!Number.isFinite(raw) || raw <= 0) return 15000;
+  return Math.floor(raw);
+}
+
+async function withTimeout(label, run, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      run(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function printSection(title, result) {
   console.log(`\n=== ${title} ===`);
   console.log(`STATUS ${result.status}`);
@@ -69,11 +89,19 @@ function printSection(title, result) {
 }
 
 function makeEngineLogRequest() {
-  return { url: "http://localhost/api/engine-log?limit=5&page=1" };
+  return makeRouteRequest("http://localhost/api/engine-log?limit=5&page=1");
+}
+
+function makeRouteRequest(url) {
+  return {
+    url,
+    nextUrl: new URL(url),
+  };
 }
 
 async function main() {
   loadEnvFile(envFile);
+  const timeoutMs = parseTimeoutMs();
 
   const now = new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul",
@@ -88,17 +116,19 @@ async function main() {
   }).format(new Date());
 
   console.log(`KST ${now}`);
+  console.log(`Route timeout ${timeoutMs}ms`);
 
   const checks = [
     ["engine", () => invoke("api/engine", "GET")],
+    ["preflight", () => invoke("api/preflight", "GET")],
     ["engine-log", () => invoke("api/engine-log", "GET", makeEngineLogRequest())],
-    ["pending-signals", () => invoke("api/pending-signals", "GET")],
+    ["pending-signals", () => invoke("api/pending-signals", "GET", makeRouteRequest("http://localhost/api/pending-signals?scope=active"))],
     ["positions", () => invoke("api/positions", "GET")],
   ];
 
   for (const [title, run] of checks) {
     try {
-      printSection(title, await run());
+      printSection(title, await withTimeout(title, run, timeoutMs));
     } catch (error) {
       console.log(`\n=== ${title} ===`);
       console.log(String(error && error.stack ? error.stack : error));

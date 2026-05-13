@@ -15,7 +15,6 @@ export interface LearnedWeights {
 
 export interface LearnedAtrMultipliers {
   stop: number;
-  profit: number;
   trailing: number;
   source: "learned" | "default";
   sampleSize: number;
@@ -32,11 +31,23 @@ export interface PatternStats {
   combos: Array<{ combo: string; count: number; winRate: number; avgPnl: number }>;
 }
 
+export interface LearningDatasetSummary {
+  sampleCount: number;
+  winRate: number;
+  avgPnl: number;
+  avgHoldDays: number;
+  strategyStats: Array<{ key: string; count: number; winRate: number; avgPnl: number; stopLossRate: number }>;
+  surgeEntryStats: Array<{ tag: string; count: number; winRate: number; avgPnl: number; stopLossRate: number }>;
+  timeBucketStats: Array<{ bucket: string; count: number; winRate: number; avgPnl: number; stopLossRate: number }>;
+  keywordStats: Array<{ keyword: string; count: number; winRate: number; avgPnl: number; stopLossRate: number }>;
+  riskHints: Array<{ label: string; count: number; winRate: number; stopLossRate: number; avgPnl: number; reason: string }>;
+}
+
 export interface LearningResult {
   weights: LearnedWeights;
   atrMultipliers: LearnedAtrMultipliers;
   positionSizing: LearnedPositionSizing;
-  risk: { takeProfitRatio: number; source: "learned" | "default" };
+  risk: { partialExitRatio: number; source: "learned" | "default" };
   patternStats: PatternStats;
   confidence: "none" | "low" | "medium" | "high";
   sampleSize: number;
@@ -217,26 +228,23 @@ export async function learnAtrMultipliers(lookbackDays = 60): Promise<LearnedAtr
 
     if (!data || data.length < 5) return defaults;
 
-    const stopMults: number[] = [], profitMults: number[] = [], trailingMults: number[] = [];
+    const stopMults: number[] = [], trailingMults: number[] = [];
     for (const row of data) {
       const atr = Number(row.atr_value);
       if (atr <= 0 || !row.pnl_percent) continue;
       // pnl% 분포로 배수 추정 (직접 역산보다 안정적). ATR 2배 = 기본 기준
       const estimatedMult = Math.abs(Number(row.pnl_percent)) / 2;
       if (row.exit_reason === "stop_loss") stopMults.push(Math.min(estimatedMult, 5));
-      else if (row.exit_reason === "take_profit") profitMults.push(Math.min(estimatedMult, 8));
       else if (row.exit_reason === "trailing_stop") trailingMults.push(Math.min(estimatedMult, 4));
     }
 
     const stopMed = stopMults.length >= 5 ? median(stopMults) : DEFAULT_ATR_MULTIPLIERS.stop;
-    const profitMed = profitMults.length >= 5 ? median(profitMults) : DEFAULT_ATR_MULTIPLIERS.profit;
     const trailingMed = trailingMults.length >= 5 ? median(trailingMults) : DEFAULT_ATR_MULTIPLIERS.trailing;
 
     return {
       stop: Math.max(stopMed, 1.0),
-      profit: Math.max(profitMed, 1.5),
       trailing: Math.max(trailingMed, 0.5),
-      source: (stopMults.length >= 5 || profitMults.length >= 5) ? "learned" : "default",
+      source: (stopMults.length >= 5 || trailingMults.length >= 5) ? "learned" : "default",
       sampleSize: data.length,
     };
   } catch {
@@ -258,19 +266,19 @@ export async function learnPositionSizing(): Promise<LearnedPositionSizing> {
   } catch { return defaults; }
 }
 
-// ─── 4. 익절 비율 (takeProfitRatio) 학습 ─────────
-export async function learnRiskParamsTakeProfitRatio(
+// ─── 4. 부분청산 비율 (partialExitRatio) 학습 ─────
+export async function learnRiskParamsPartialExitRatio(
   lookbackDays = 60
-): Promise<{ takeProfitRatio: number; source: "learned" | "default" }> {
-  const def = { takeProfitRatio: 50, source: "default" as const };
+): Promise<{ partialExitRatio: number; source: "learned" | "default" }> {
+  const def = { partialExitRatio: 50, source: "default" as const };
   try {
     const since = new Date(Date.now() - lookbackDays * 86400000).toISOString();
     const { data } = await supabase.from("trade_memory").select("is_win")
       .not("closed_at", "is", null).gte("closed_at", since);
     if (!data || data.length < 10) return def;
     const wr = data.filter((r) => r.is_win === true).length / data.length;
-    const takeProfitRatio = wr > 0.6 ? 30 : wr > 0.5 ? 40 : wr < 0.35 ? 70 : 50;
-    return { takeProfitRatio, source: "learned" };
+    const partialExitRatio = wr > 0.6 ? 30 : wr > 0.5 ? 40 : wr < 0.35 ? 70 : 50;
+    return { partialExitRatio, source: "learned" };
   } catch { return def; }
 }
 
@@ -347,10 +355,10 @@ export async function saveLearning(result: LearningResult): Promise<void> {
   await supabase.from("learning_snapshots").insert({
     sample_size: r.sampleSize, confidence: r.confidence,
     weights_trending: r.weights.trending, weights_ranging: r.weights.ranging, weights_source: r.weights.source,
-    atr_mult_stop: r.atrMultipliers.stop, atr_mult_profit: r.atrMultipliers.profit,
+    atr_mult_stop: r.atrMultipliers.stop,
     atr_mult_trailing: r.atrMultipliers.trailing, atr_source: r.atrMultipliers.source,
     target_risk_amount: r.positionSizing.targetRiskAmount, sizing_source: r.positionSizing.source,
-    take_profit_ratio: r.risk.takeProfitRatio, risk_source: r.risk.source,
+    take_profit_ratio: r.risk.partialExitRatio, risk_source: r.risk.source,
     win_rate: r.winRate, avg_win: r.avgWin, avg_loss: r.avgLoss,
     pattern_stats: r.patternStats, is_active: true,
     expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -374,4 +382,165 @@ export async function calcOverallStats(lookbackDays: number) {
       avgLoss: losses.length > 0 ? Math.round(Math.abs(sumPnl(losses) / losses.length) * 100) / 100 : 0,
     };
   } catch { return zero; }
+}
+
+function resolveTimeBucket(entryDate: string): string {
+  const hour = new Date(entryDate).getHours();
+  if (hour <= 9) return "장초반";
+  if (hour <= 11) return "오전";
+  if (hour <= 14) return "오후";
+  return "장마감";
+}
+
+type DatasetAgg = { count: number; wins: number; pnlSum: number; stopLossCount: number };
+
+function pushAgg(map: Map<string, DatasetAgg>, key: string, pnlAmount: number, exitReason: string | null) {
+  const current = map.get(key) ?? { count: 0, wins: 0, pnlSum: 0, stopLossCount: 0 };
+  current.count += 1;
+  current.pnlSum += pnlAmount;
+  if (pnlAmount > 0) current.wins += 1;
+  if ((exitReason ?? "unknown") === "stop_loss") current.stopLossCount += 1;
+  map.set(key, current);
+}
+
+function mapDatasetAgg(map: Map<string, DatasetAgg>, labelField: "key" | "tag" | "bucket") {
+  return Array.from(map.entries()).map(([label, value]) => ({
+    [labelField]: label,
+    count: value.count,
+    winRate: value.count > 0 ? (value.wins / value.count) * 100 : 0,
+    avgPnl: value.count > 0 ? value.pnlSum / value.count : 0,
+    stopLossRate: value.count > 0 ? (value.stopLossCount / value.count) * 100 : 0,
+  })) as Array<{ [K in typeof labelField]: string } & { count: number; winRate: number; avgPnl: number; stopLossRate: number }>;
+}
+
+export async function buildLearningDatasetSummary(lookbackDays = 180): Promise<LearningDatasetSummary> {
+  const empty: LearningDatasetSummary = {
+    sampleCount: 0,
+    winRate: 0,
+    avgPnl: 0,
+    avgHoldDays: 0,
+    strategyStats: [],
+    surgeEntryStats: [],
+    timeBucketStats: [],
+    keywordStats: [],
+    riskHints: [],
+  };
+
+  try {
+    const since = new Date(Date.now() - lookbackDays * 86400000).toISOString();
+    const { data } = await supabase
+      .from("positions")
+      .select("entry_date, exit_reason, pnl_amount, hold_days, entry_signal, status")
+      .eq("status", "closed")
+      .gte("exit_date", since);
+
+    if (!data || data.length === 0) return empty;
+
+    const strategyMap = new Map<string, DatasetAgg>();
+    const surgeEntryMap = new Map<string, DatasetAgg>();
+    const timeBucketMap = new Map<string, DatasetAgg>();
+    const keywordMap = new Map<string, DatasetAgg>();
+    let wins = 0;
+    let pnlSum = 0;
+    let holdDaysSum = 0;
+
+    for (const row of data) {
+      const entrySignal = (row.entry_signal as { strategyKey?: string; entryTag?: string; newsKeywords?: string[] } | null) ?? null;
+      const strategyKey = entrySignal?.strategyKey ?? "unclassified";
+      const entryTag = entrySignal?.entryTag ?? "unknown";
+      const newsKeywords = Array.isArray(entrySignal?.newsKeywords) ? entrySignal.newsKeywords : [];
+      const pnlAmount = Number(row.pnl_amount ?? 0);
+      const exitReason = (row.exit_reason as string | null) ?? null;
+      const bucket = resolveTimeBucket(String(row.entry_date ?? ""));
+
+      if (pnlAmount > 0) wins += 1;
+      pnlSum += pnlAmount;
+      holdDaysSum += Number(row.hold_days ?? 0);
+
+      pushAgg(strategyMap, strategyKey, pnlAmount, exitReason);
+      pushAgg(timeBucketMap, bucket, pnlAmount, exitReason);
+      if (strategyKey === "surge_momentum") pushAgg(surgeEntryMap, entryTag, pnlAmount, exitReason);
+      for (const keyword of newsKeywords) {
+        pushAgg(keywordMap, keyword, pnlAmount, exitReason);
+      }
+    }
+
+    const strategyStats = mapDatasetAgg(strategyMap, "key")
+      .sort((a, b) => b.count - a.count || b.avgPnl - a.avgPnl)
+      .slice(0, 6);
+    const surgeEntryStats = mapDatasetAgg(surgeEntryMap, "tag")
+      .sort((a, b) => b.count - a.count || b.avgPnl - a.avgPnl)
+      .slice(0, 6);
+    const timeBucketStats = mapDatasetAgg(timeBucketMap, "bucket")
+      .sort((a, b) => b.count - a.count);
+    const keywordStats = mapDatasetAgg(keywordMap, "key")
+      .map((item) => ({
+        keyword: item.key,
+        count: item.count,
+        winRate: item.winRate,
+        avgPnl: item.avgPnl,
+        stopLossRate: item.stopLossRate,
+      }))
+      .sort((a, b) => b.count - a.count || a.avgPnl - b.avgPnl)
+      .slice(0, 12);
+
+    const riskHints = [
+      ...strategyStats
+        .filter((item) => item.count >= 5 && (item.winRate < 45 || item.stopLossRate >= 35 || item.avgPnl < 0))
+        .map((item) => ({
+          label: item.key,
+          count: item.count,
+          winRate: item.winRate,
+          stopLossRate: item.stopLossRate,
+          avgPnl: item.avgPnl,
+          reason: "전략 실패 패턴",
+        })),
+      ...surgeEntryStats
+        .filter((item) => item.count >= 4 && (item.winRate < 45 || item.stopLossRate >= 35 || item.avgPnl < 0))
+        .map((item) => ({
+          label: item.tag,
+          count: item.count,
+          winRate: item.winRate,
+          stopLossRate: item.stopLossRate,
+          avgPnl: item.avgPnl,
+          reason: "급등주 진입 타입 리스크",
+        })),
+      ...timeBucketStats
+        .filter((item) => item.count >= 4 && (item.winRate < 45 || item.stopLossRate >= 35 || item.avgPnl < 0))
+        .map((item) => ({
+          label: item.bucket,
+          count: item.count,
+          winRate: item.winRate,
+          stopLossRate: item.stopLossRate,
+          avgPnl: item.avgPnl,
+          reason: "시간대 리스크",
+        })),
+      ...keywordStats
+        .filter((item) => item.count >= 4 && (item.winRate < 45 || item.stopLossRate >= 35 || item.avgPnl < 0))
+        .map((item) => ({
+          label: item.keyword,
+          count: item.count,
+          winRate: item.winRate,
+          stopLossRate: item.stopLossRate,
+          avgPnl: item.avgPnl,
+          reason: "뉴스 키워드 리스크",
+        })),
+    ]
+      .sort((a, b) => b.stopLossRate - a.stopLossRate || a.winRate - b.winRate || a.avgPnl - b.avgPnl)
+      .slice(0, 8);
+
+    return {
+      sampleCount: data.length,
+      winRate: data.length > 0 ? (wins / data.length) * 100 : 0,
+      avgPnl: data.length > 0 ? pnlSum / data.length : 0,
+      avgHoldDays: data.length > 0 ? holdDaysSum / data.length : 0,
+      strategyStats,
+      surgeEntryStats,
+      timeBucketStats,
+      keywordStats,
+      riskHints,
+    };
+  } catch {
+    return empty;
+  }
 }

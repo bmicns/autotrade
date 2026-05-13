@@ -31,7 +31,7 @@ export default function SettingsPage() {
       {!isMobile && <SideBar />}
       <div style={{ marginLeft: isMobile ? 0 : 182 }}>
         <TopBar />
-        <div style={{ paddingBottom: isMobile ? 90 : 40 }}>
+        <div style={{ paddingBottom: isMobile ? 120 : 40 }}>
           <SettingsTab />
         </div>
       </div>

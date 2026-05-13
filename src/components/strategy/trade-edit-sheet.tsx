@@ -5,8 +5,8 @@ import { COLORS } from "@/lib/constants";
 import { TradeSettings } from "@/lib/store";
 
 export type SettingKey =
-  | "maxAmountPerTrade" | "maxTradesPerDay"
-  | "stopLoss" | "takeProfit" | "trailingStop"
+  | "maxTradesPerDay"
+  | "stopLoss" | "trailingStop"
   | "dailyLossLimit" | "maxHoldDays"
   | "morningSession" | "afternoonSession";
 
@@ -34,10 +34,8 @@ interface Props {
 export function TradeEditSheet({ meta, ts, onSave, onClose }: Props) {
   const [value, setValue] = useState(() => {
     switch (meta.key) {
-      case "maxAmountPerTrade": return String(ts.maxAmountPerTrade);
       case "maxTradesPerDay": return String(ts.maxTradesPerDay);
       case "stopLoss": return String(ts.stopLoss);
-      case "takeProfit": return String(ts.takeProfit);
       case "trailingStop": return String(ts.trailingStop);
       case "dailyLossLimit": return String(ts.dailyLossLimit);
       case "maxHoldDays": return String(ts.maxHoldDays);
@@ -52,16 +50,10 @@ export function TradeEditSheet({ meta, ts, onSave, onClose }: Props) {
       default: return "";
     }
   });
-  const [ratio, setRatio] = useState(() => (
-    meta.key === "takeProfit" ? String(ts.takeProfitRatio) : ""
-  ));
-
   const handleSave = () => {
     switch (meta.key) {
-      case "maxAmountPerTrade":  onSave({ maxAmountPerTrade: Number(value) || 100 }); break;
       case "maxTradesPerDay":    onSave({ maxTradesPerDay: Number(value) || 5 }); break;
       case "stopLoss":           onSave({ stopLoss: Number(value) || 5 }); break;
-      case "takeProfit":         onSave({ takeProfit: Number(value) || 5, takeProfitRatio: Number(ratio) || 50 }); break;
       case "trailingStop":       onSave({ trailingStop: Number(value) || 3 }); break;
       case "dailyLossLimit":     onSave({ dailyLossLimit: Number(value) || 3 }); break;
       case "maxHoldDays":        onSave({ maxHoldDays: Number(value) || 5 }); break;
@@ -83,7 +75,7 @@ export function TradeEditSheet({ meta, ts, onSave, onClose }: Props) {
         <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.ink, marginBottom: 6 }}>{meta.label}</div>
         <div style={{ fontSize: 12, color: COLORS.dim, marginBottom: 20 }}>{meta.description}</div>
 
-        {meta.type === "number" && meta.key !== "takeProfit" && (
+        {meta.type === "number" && (
           <div style={{ marginBottom: 20 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input type="number" value={value} onChange={(e) => setValue(e.target.value)}
@@ -102,27 +94,6 @@ export function TradeEditSheet({ meta, ts, onSave, onClose }: Props) {
                 </div>
               </>
             )}
-          </div>
-        )}
-
-        {meta.key === "takeProfit" && (
-          <div style={{ marginBottom: 20, display: "flex", flexDirection: "column" as const, gap: 12 }}>
-            <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>익절 기준</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input type="number" value={value} onChange={(e) => setValue(e.target.value)} min={1} max={50} step={0.5}
-                  style={{ ...inputStyle, fontSize: 20, fontWeight: 700, padding: "14px 16px", textAlign: "center" }} />
-                <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.mid, flexShrink: 0 }}>%</span>
-              </div>
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 6 }}>매도 비율</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input type="number" value={ratio} onChange={(e) => setRatio(e.target.value)} min={10} max={100} step={10}
-                  style={{ ...inputStyle, fontSize: 20, fontWeight: 700, padding: "14px 16px", textAlign: "center" }} />
-                <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.mid, flexShrink: 0 }}>%</span>
-              </div>
-            </div>
           </div>
         )}
 

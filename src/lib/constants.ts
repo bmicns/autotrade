@@ -17,12 +17,23 @@ export const COLORS = {
   hero: "#0F0F2E",
 } as const;
 
-export const KIS_RUNTIME_MODE = process.env.KIS_RUNTIME_MODE ?? "paper";
-export const KIS_API_BASE = process.env.KIS_API_BASE_URL ?? "https://openapivts.koreainvestment.com:29443";
-export const KIS_WS_URL = process.env.KIS_WS_URL ?? "ws://ops.koreainvestment.com:31000";
+function envOr(key: string, fallback: string): string {
+  const value = process.env[key];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function envNameOr(key: string, fallback: "dev" | "paper" | "prod"): "dev" | "paper" | "prod" {
+  const value = envOr(key, fallback);
+  return value === "paper" || value === "prod" ? value : "dev";
+}
+
+export const NEXIO_ENV = envNameOr("NEXIO_ENV", "dev");
+export const KIS_RUNTIME_MODE = envOr("KIS_RUNTIME_MODE", "paper");
+export const KIS_API_BASE = envOr("KIS_API_BASE_URL", "https://openapivts.koreainvestment.com:29443");
+export const KIS_WS_URL = envOr("KIS_WS_URL", "ws://ops.koreainvestment.com:31000");
 
 function trEnv(key: string, fallback: string): string {
-  return process.env[key] ?? fallback;
+  return envOr(key, fallback);
 }
 
 export const KIS_TR = {

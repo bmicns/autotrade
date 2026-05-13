@@ -1,8 +1,11 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { COLORS } from "@/lib/constants";
 import { useAppStore } from "@/lib/store";
 import { Icon } from "@/components/ui/icons";
+import { MarketScopeBar } from "@/components/layout/market-scope-bar";
 
 const titles: Record<string, string> = {
   home: "", signal: "신호 승인", portfolio: "포트폴리오",
@@ -10,43 +13,40 @@ const titles: Record<string, string> = {
 };
 
 export function TopBar() {
-  const { tab, setTab, autoTrade, toggleAutoTrade } = useAppStore();
+  const router = useRouter();
+  const { tab, setTab } = useAppStore();
   const isHome = tab === "home";
+  const showMarketScope = tab === "home" || tab === "signal" || tab === "portfolio" || tab === "stats";
+  const goHome = () => {
+    setTab("home");
+    router.push("/");
+  };
 
   return (
     <div
-      className="sticky top-0 z-50 flex items-center justify-between backdrop-blur-xl"
+      className="sticky top-0 z-50 backdrop-blur-xl"
       style={{
         background: "rgba(15,15,46,0.97)",
         borderBottom: "1px solid rgba(255,255,255,0.08)",
-        padding: "12px 16px",
+        padding: "9px 16px",
       }}
     >
       {isHome ? (
-        <>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div className="text-[20px] font-black tracking-[0.15em] text-white">
             NEXIO<span style={{ color: COLORS.rise }}>.</span>
           </div>
-          <button
-            onClick={toggleAutoTrade}
-            className="flex items-center gap-2 rounded-full transition-all"
-            style={{
-              padding: "5px 30px",
-              background: autoTrade ? COLORS.rise : "rgba(255,255,255,0.1)",
-              border: `1px solid ${autoTrade ? COLORS.rise : "rgba(255,255,255,0.15)"}`,
-            }}
-          >
-            {autoTrade && (
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
-            )}
-            <span className="text-[11px] font-bold text-white">{autoTrade ? "ON" : "OFF"}</span>
-          </button>
-        </>
+          {showMarketScope && (
+            <div style={{ minWidth: 98 }}>
+              <MarketScopeBar compact dark />
+            </div>
+          )}
+        </div>
       ) : (
-        <>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {/* 왼쪽: 뒤로가기 */}
           <button
-            onClick={() => setTab("home")}
+            onClick={goHome}
             style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" }}
             aria-label="뒤로가기"
           >
@@ -60,15 +60,22 @@ export function TopBar() {
             {titles[tab]}
           </span>
 
-          {/* 오른쪽: 홈 */}
-          <button
-            onClick={() => setTab("home")}
-            style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" }}
-            aria-label="홈으로"
-          >
-            <Icon name="home" size={20} color="#fff" strokeWidth={1.8} />
-          </button>
-        </>
+          {/* 오른쪽: 시장 + 홈 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {showMarketScope && (
+              <div style={{ minWidth: 98 }}>
+                <MarketScopeBar compact dark />
+              </div>
+            )}
+            <button
+              onClick={goHome}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" }}
+              aria-label="홈으로"
+            >
+              <Icon name="home" size={20} color="#fff" strokeWidth={1.8} />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

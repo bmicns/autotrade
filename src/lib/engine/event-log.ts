@@ -1,10 +1,10 @@
-import { supabase } from "@/lib/supabase/api-client";
+import { supabase } from "../supabase/api-client";
 import { type EngineEventType } from "@/lib/engine/event-types";
 
 export interface EngineEventRecord {
   eventType: EngineEventType;
   stockCode?: string | null;
-  entityTable: "positions" | "pending_orders" | "pending_signals" | "trade_memory";
+  entityTable: "positions" | "pending_orders" | "pending_signals" | "trade_memory" | "app_config" | "operations";
   entityId?: string | null;
   payload: Record<string, unknown>;
 }

@@ -1,11 +1,46 @@
 // ─── KIS API 호출 함수 ───────────────────────────
 import { KIS_API_BASE, KIS_TR } from "@/lib/constants";
 import type { MinuteCandle } from "@/lib/engine/intraday";
+import { shouldRetryKisRequest, shouldRetryRateLimit } from "@/lib/engine/kis-rate-limit";
 import { type DailyCandle } from "@/lib/kis/indicators";
-import { type EngineConfig, type OrderResult, type OpenOrder } from "./types";
+import { resolveKisAccountParts } from "@/lib/kis/account";
+import { type EngineConfig, type KISPriceOutput, type OpenOrder, type OrderResult, type PendingOrderFillStatus } from "./types";
 import { KIS_RATE_LIMIT_DELAY_MS } from "./constants";
 
-type KISCreds = Pick<EngineConfig, "appKey" | "appSecret" | "accountNo" | "token">;
+type KISCreds = Pick<EngineConfig, "appKey" | "appSecret" | "accountNo" | "accountProductCode" | "token">;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function parseOrderError(res: Response): Promise<string> {
+  const text = await res.text().catch(() => "응답 없음");
+  return `HTTP ${res.status}: ${text.slice(0, 200)}`;
+}
+
+function getKisErrorCode(payload: Record<string, unknown>): string | undefined {
+  const raw = payload.msg_cd ?? payload.error_code ?? payload.rt_cd ?? payload.error;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+}
+
+function getKisErrorMessage(payload: Record<string, unknown>): string | undefined {
+  const raw = payload.msg1 ?? payload.msg ?? payload.error_description ?? payload.error;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+}
+
+function formatKisErrorDetail(payload: Record<string, unknown>, fallback: string): string {
+  const code = getKisErrorCode(payload);
+  const message = getKisErrorMessage(payload) ?? fallback;
+  return code ? `[${code}] ${message}` : message;
+}
+
+function buildPriceErrorOutput(detail: string, meta?: { code?: string; status?: number }): KISPriceOutput {
+  return {
+    __error_message: detail.slice(0, 200),
+    __error_code: meta?.code,
+    __http_status: typeof meta?.status === "number" ? String(meta.status) : undefined,
+  };
+}
 
 // ─── KIS API 유틸 ───────────────────────────────
 export function headers(config: KISCreds, trId: string) {
@@ -18,11 +53,60 @@ export function headers(config: KISCreds, trId: string) {
 
 export async function getPrice(config: EngineConfig, code: string) {
   const params = new URLSearchParams({ fid_cond_mrkt_div_code: "J", fid_input_iscd: code });
-  const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`, {
-    headers: headers(config, KIS_TR.PRICE),
-  });
-  if (!res.ok) return null;
-  return (await res.json()).output;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`, {
+        headers: headers(config, KIS_TR.PRICE),
+      });
+
+      if (!res.ok) {
+        const detail = await parseOrderError(res);
+        if (attempt === 0 && shouldRetryKisRequest(detail, res.status)) {
+          await sleep(shouldRetryRateLimit(detail) ? KIS_RATE_LIMIT_DELAY_MS * 6 : KIS_RATE_LIMIT_DELAY_MS * 2);
+          continue;
+        }
+        return buildPriceErrorOutput(detail, { status: res.status });
+      }
+
+      const data = await res.json().catch(() => null);
+      if (!data || typeof data !== "object") {
+        if (attempt === 0) {
+          await sleep(KIS_RATE_LIMIT_DELAY_MS * 2);
+          continue;
+        }
+        return buildPriceErrorOutput("현재가 응답 파싱 실패");
+      }
+
+      const payload = data as Record<string, unknown>;
+      const output = payload.output;
+      const outputRecord = output && typeof output === "object" ? output as KISPriceOutput : null;
+      if (outputRecord) {
+        const price = Number(outputRecord.stck_prpr) || 0;
+        if (price > 0 || outputRecord.hts_kor_isnm || outputRecord.bstp_kor_isnm) return outputRecord;
+      }
+
+      const detail = formatKisErrorDetail(payload, "현재가 응답에 유효한 시세가 없음");
+      if (attempt === 0) {
+        await sleep(shouldRetryRateLimit(detail) ? KIS_RATE_LIMIT_DELAY_MS * 6 : KIS_RATE_LIMIT_DELAY_MS * 2);
+        continue;
+      }
+
+      return {
+        ...(outputRecord ?? {}),
+        ...buildPriceErrorOutput(detail, { code: getKisErrorCode(payload) }),
+      };
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : "현재가 조회 네트워크 오류";
+      if (attempt === 0) {
+        await sleep(KIS_RATE_LIMIT_DELAY_MS * 2);
+        continue;
+      }
+      return buildPriceErrorOutput(detail);
+    }
+  }
+
+  return buildPriceErrorOutput("현재가 재조회 실패");
 }
 
 export async function getDailyCandles(config: EngineConfig, code: string): Promise<DailyCandle[]> {
@@ -44,45 +128,70 @@ export async function getDailyCandles(config: EngineConfig, code: string): Promi
 }
 
 export async function getBalance(config: EngineConfig) {
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
+  const { cano, productCode: acntPrdtCd } = resolveKisAccountParts(config.accountNo, config.accountProductCode);
   const params = new URLSearchParams({
     CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
     AFHR_FLPR_YN: "N", OFL_YN: "", INQR_DVSN: "02", UNPR_DVSN: "01",
     FUND_STTL_ICLD_YN: "N", FNCG_AMT_AUTO_RDPT_YN: "N", PRCS_DVSN: "00",
     CTX_AREA_FK100: "", CTX_AREA_NK100: "",
   });
-  const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`, {
-    headers: headers(config, KIS_TR.BALANCE),
-  });
-  if (!res.ok) return null;
-  return res.json();
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`, {
+      headers: headers(config, KIS_TR.BALANCE),
+    });
+    if (res.ok) return res.json();
+
+    const detail = await parseOrderError(res);
+    if (attempt === 0 && shouldRetryKisRequest(detail, res.status)) {
+      await sleep(shouldRetryRateLimit(detail) ? KIS_RATE_LIMIT_DELAY_MS * 6 : KIS_RATE_LIMIT_DELAY_MS * 2);
+      continue;
+    }
+    return null;
+  }
+
+  return null;
 }
 
 export async function executeOrder(config: EngineConfig, trId: string, code: string, qty: number): Promise<OrderResult> {
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
+  const { cano, productCode: acntPrdtCd } = resolveKisAccountParts(config.accountNo, config.accountProductCode);
   try {
-    const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
-      method: "POST", headers: headers(config, trId),
-      body: JSON.stringify({ CANO: cano, ACNT_PRDT_CD: acntPrdtCd, PDNO: code, ORD_DVSN: "01", ORD_QTY: String(qty), ORD_UNPR: "0" }),
-    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
+        method: "POST", headers: headers(config, trId),
+        body: JSON.stringify({ CANO: cano, ACNT_PRDT_CD: acntPrdtCd, PDNO: code, ORD_DVSN: "01", ORD_QTY: String(qty), ORD_UNPR: "0" }),
+      });
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "응답 없음");
-      return { success: false, msg: `HTTP ${res.status}: ${text.slice(0, 200)}` };
+      if (!res.ok) {
+        const detail = await parseOrderError(res);
+        if (attempt === 0 && shouldRetryKisRequest(detail, res.status)) {
+          await sleep(shouldRetryRateLimit(detail) ? KIS_RATE_LIMIT_DELAY_MS * 6 : KIS_RATE_LIMIT_DELAY_MS * 2);
+          continue;
+        }
+        return { success: false, msg: detail };
+      }
+
+      const data = await res.json();
+      const rtCd = data.rt_cd;  // "0" = 성공
+      const msg = data.msg1 || data.msg || "응답 없음";
+
+      if (rtCd === "0") {
+        return { success: true, msg, ordNo: data.output?.ODNO, raw: data };
+      }
+
+      const detail = `[${rtCd}] ${msg}`;
+      if (attempt === 0 && shouldRetryKisRequest(detail)) {
+        await sleep(shouldRetryRateLimit(detail) ? KIS_RATE_LIMIT_DELAY_MS * 6 : KIS_RATE_LIMIT_DELAY_MS * 2);
+        continue;
+      }
+      return { success: false, msg: detail, raw: data };
     }
-
-    const data = await res.json();
-    const rtCd = data.rt_cd;  // "0" = 성공
-    const msg = data.msg1 || data.msg || "응답 없음";
-
-    if (rtCd === "0") {
-      return { success: true, msg, ordNo: data.output?.ODNO, raw: data };
-    }
-    return { success: false, msg: `[${rtCd}] ${msg}`, raw: data };
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : "네트워크 오류";
     return { success: false, msg: errMsg };
   }
+
+  return { success: false, msg: "주문 재시도 실패" };
 }
 
 export async function sellOrder(config: EngineConfig, code: string, qty: number): Promise<OrderResult> {
@@ -107,28 +216,45 @@ export function roundToTick(price: number): number {
 // ─── 지정가 매수 (현재가 -0.2%) ─────────────────
 export async function limitBuyOrder(config: EngineConfig, code: string, qty: number, currentPrice: number): Promise<OrderResult & { limitPrice: number }> {
   const limitPrice = roundToTick(currentPrice * 0.998);
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
+  const { cano, productCode: acntPrdtCd } = resolveKisAccountParts(config.accountNo, config.accountProductCode);
   try {
-    const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
-      method: "POST", headers: headers(config, KIS_TR.BUY),
-      body: JSON.stringify({
-        CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
-        PDNO: code, ORD_DVSN: "00",          // 지정가
-        ORD_QTY: String(qty), ORD_UNPR: String(limitPrice),
-      }),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "응답 없음");
-      return { success: false, msg: `HTTP ${res.status}: ${text.slice(0, 200)}`, limitPrice };
+    // Current-price lookup often happens immediately before the order call.
+    await sleep(KIS_RATE_LIMIT_DELAY_MS);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
+        method: "POST", headers: headers(config, KIS_TR.BUY),
+        body: JSON.stringify({
+          CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
+          PDNO: code, ORD_DVSN: "00",          // 지정가
+          ORD_QTY: String(qty), ORD_UNPR: String(limitPrice),
+        }),
+      });
+      if (!res.ok) {
+        const detail = await parseOrderError(res);
+        if (attempt === 0 && shouldRetryKisRequest(detail, res.status)) {
+          await sleep(shouldRetryRateLimit(detail) ? KIS_RATE_LIMIT_DELAY_MS * 6 : KIS_RATE_LIMIT_DELAY_MS * 2);
+          continue;
+        }
+        return { success: false, msg: detail, limitPrice };
+      }
+
+      const data = await res.json();
+      if (data.rt_cd === "0") {
+        return { success: true, msg: data.msg1 || "성공", ordNo: data.output?.ODNO, raw: data, limitPrice };
+      }
+
+      const msg = `[${data.rt_cd}] ${data.msg1 || data.msg}`;
+      if (attempt === 0 && shouldRetryKisRequest(msg)) {
+        await sleep(shouldRetryRateLimit(msg) ? KIS_RATE_LIMIT_DELAY_MS * 6 : KIS_RATE_LIMIT_DELAY_MS * 2);
+        continue;
+      }
+      return { success: false, msg, raw: data, limitPrice };
     }
-    const data = await res.json();
-    if (data.rt_cd === "0") {
-      return { success: true, msg: data.msg1 || "성공", ordNo: data.output?.ODNO, raw: data, limitPrice };
-    }
-    return { success: false, msg: `[${data.rt_cd}] ${data.msg1 || data.msg}`, raw: data, limitPrice };
   } catch (e: unknown) {
     return { success: false, msg: e instanceof Error ? e.message : "네트워크 오류", limitPrice };
   }
+
+  return { success: false, msg: "주문 재시도 실패", limitPrice };
 }
 
 // ─── 주문 체결 여부 확인 ─────────────────────────
@@ -136,8 +262,8 @@ export async function checkOrderFill(
   config: EngineConfig,
   orderNo: string,
   stockCode: string,
-): Promise<{ filled: boolean; filledQty: number; filledPrice: number }> {
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
+): Promise<PendingOrderFillStatus> {
+  const { cano, productCode: acntPrdtCd } = resolveKisAccountParts(config.accountNo, config.accountProductCode);
   try {
     const params = new URLSearchParams({
       CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
@@ -155,15 +281,53 @@ export async function checkOrderFill(
       `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-ccnl?${params}`,
       { headers: headers(config, "VTTC8001R") },
     );
-    if (!res.ok) return { filled: false, filledQty: 0, filledPrice: 0 };
+    if (!res.ok) {
+      return { status: "error", filledQty: 0, remainingQty: 0, filledPrice: 0, detail: await parseOrderError(res) };
+    }
     const data = await res.json();
     const output = (data.output || []) as Record<string, string>[];
     const matched = output.filter((o) => o.odno === orderNo || o.orgn_odno === orderNo);
     const totalFilled = matched.reduce((s, o) => s + (Number(o.tot_ccld_qty) || Number(o.ccld_qty) || 0), 0);
     const filledPrice = matched.length > 0 ? (Number(matched[0].avg_prvs) || Number(matched[0].ccld_unpr) || 0) : 0;
-    return { filled: totalFilled > 0, filledQty: totalFilled, filledPrice };
+    const openOrders = await getOpenBuyOrders(config);
+    const openOrder = openOrders.find((order) => order.odno === orderNo || order.orgn_odno === orderNo);
+    const remainingQty = Number(openOrder?.rmn_qty) || 0;
+    if (totalFilled > 0 && remainingQty > 0) {
+      return {
+        status: "partial",
+        filledQty: totalFilled,
+        remainingQty,
+        filledPrice,
+        detail: `부분체결 ${totalFilled}주, 잔여 ${remainingQty}주`,
+      };
+    }
+    if (totalFilled > 0) {
+      return {
+        status: "filled",
+        filledQty: totalFilled,
+        remainingQty: 0,
+        filledPrice,
+        detail: `전량체결 ${totalFilled}주`,
+      };
+    }
+    if (remainingQty > 0) {
+      return {
+        status: "open",
+        filledQty: 0,
+        remainingQty,
+        filledPrice: 0,
+        detail: `미체결 잔여 ${remainingQty}주`,
+      };
+    }
+    return {
+      status: "not_found",
+      filledQty: 0,
+      remainingQty: 0,
+      filledPrice: 0,
+      detail: "체결/미체결 조회 결과 없음",
+    };
   } catch {
-    return { filled: false, filledQty: 0, filledPrice: 0 };
+    return { status: "error", filledQty: 0, remainingQty: 0, filledPrice: 0, detail: "체결 조회 실패" };
   }
 }
 
@@ -195,7 +359,7 @@ export async function getMinuteCandles(config: EngineConfig, code: string): Prom
 
 // ─── 미체결 매수 주문 조회 ───────────────────────
 export async function getOpenBuyOrders(config: KISCreds): Promise<OpenOrder[]> {
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
+  const { cano, productCode: acntPrdtCd } = resolveKisAccountParts(config.accountNo, config.accountProductCode);
   try {
     const params = new URLSearchParams({
       CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
@@ -219,7 +383,7 @@ export async function getOpenBuyOrders(config: KISCreds): Promise<OpenOrder[]> {
 export async function cancelOpenBuyOrders(config: KISCreds): Promise<{ cancelled: number; failed: number }> {
   const orders = await getOpenBuyOrders(config);
   let cancelled = 0, failed = 0;
-  const [cano, acntPrdtCd] = [config.accountNo.slice(0, 8), config.accountNo.slice(8, 10) || "01"];
+  const { cano, productCode: acntPrdtCd } = resolveKisAccountParts(config.accountNo, config.accountProductCode);
 
   for (const ord of orders) {
     const rmn = Number(ord.rmn_qty || 0);
@@ -244,4 +408,55 @@ export async function cancelOpenBuyOrders(config: KISCreds): Promise<{ cancelled
     await new Promise((r) => setTimeout(r, KIS_RATE_LIMIT_DELAY_MS));
   }
   return { cancelled, failed };
+}
+
+export async function cancelBuyOrder(
+  config: KISCreds,
+  orderNo: string,
+): Promise<OrderResult & { remainingQty?: number | null }> {
+  const orders = await getOpenBuyOrders(config);
+  const target = orders.find((ord) => ord.odno === orderNo || ord.orgn_odno === orderNo);
+  if (!target) {
+    return { success: false, msg: "취소 대상 미체결 주문 없음", remainingQty: 0 };
+  }
+
+  const rmn = Number(target.rmn_qty || 0);
+  if (rmn <= 0) {
+    return { success: false, msg: "잔여 수량 없음", remainingQty: 0 };
+  }
+
+  const { cano, productCode: acntPrdtCd } = resolveKisAccountParts(config.accountNo, config.accountProductCode);
+  try {
+    const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-rvsecncl`, {
+      method: "POST",
+      headers: headers(config, KIS_TR.CANCEL),
+      body: JSON.stringify({
+        CANO: cano,
+        ACNT_PRDT_CD: acntPrdtCd,
+        KRX_FWDG_ORD_ORGNO: target.ord_gno_brno,
+        ORGN_ODNO: target.odno,
+        ORD_DVSN: "00",
+        RVSE_CNCL_DVSN_CD: "02",
+        ORD_QTY: String(rmn),
+        ORD_UNPR: "0",
+        QTY_ALL_ORD_YN: "Y",
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && (data as Record<string, string>).rt_cd === "0") {
+      return { success: true, msg: String((data as Record<string, string>).msg1 || "취소 성공"), ordNo: target.odno, raw: data, remainingQty: rmn };
+    }
+    return {
+      success: false,
+      msg: formatKisErrorDetail(data as Record<string, unknown>, "취소 실패"),
+      raw: data as Record<string, unknown>,
+      remainingQty: rmn,
+    };
+  } catch (error: unknown) {
+    return {
+      success: false,
+      msg: error instanceof Error ? error.message : "취소 네트워크 오류",
+      remainingQty: rmn,
+    };
+  }
 }

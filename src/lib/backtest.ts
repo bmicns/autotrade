@@ -13,8 +13,9 @@ export interface BacktestConfig {
   candles: DailyCandle[];
   initialCash: number;
   stopLoss: number;       // % (예: -5)
-  takeProfit: number;     // % (예: 5)
   trailingStop: number;   // % (예: -3)
+  partialExitRatio: number;
+  maxHoldDays: number;
   maxPerTrade: number;    // 최대 매수 금액
 }
 
@@ -50,7 +51,7 @@ export interface BacktestResult {
   monthlyReturns: { month: string; returnPct: number; trades: number }[];
   patternStats: { pattern: string; count: number; winRate: number; avgPnl: number }[];
   equityCurve: { date: string; equity: number }[];
-  config: { stopLoss: number; takeProfit: number; trailingStop: number };
+  config: { stopLoss: number; trailingStop: number; partialExitRatio: number; maxHoldDays: number };
 }
 
 // ─── 백테스트 실행 ─────────────────────────────
@@ -58,7 +59,7 @@ export interface BacktestResult {
 export function runBacktest(config: BacktestConfig): BacktestResult {
   const {
     stockCode, stockName = stockCode, candles, initialCash,
-    stopLoss, takeProfit, trailingStop, maxPerTrade,
+    stopLoss, trailingStop, partialExitRatio, maxHoldDays, maxPerTrade,
   } = config;
 
   const trades: BacktestTrade[] = [];
@@ -71,6 +72,9 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     entryPrice: number;
     quantity: number;
     highSinceEntry: number;
+    phase: "initial" | "partial_tp";
+    partialExitPrice: number | null;
+    partialExitQty: number;
     signal: string;
     patterns: string[];
   } | null = null;
@@ -97,25 +101,48 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         today.close,
         position.highSinceEntry,
         stopLoss,
-        takeProfit,
         trailingStop,
       );
 
       // 매도 신호 체크
       const sellSignal = signal.side === "sell";
+      const holdDays = Math.max(1, Math.round((new Date(today.date).getTime() - new Date(position.entryDate).getTime()) / 86400000));
+      const pnlPercentNow = ((today.close - position.entryPrice) / position.entryPrice) * 100;
+      const shouldMaxHoldSell = holdDays >= maxHoldDays && pnlPercentNow <= 0;
 
-      if (risk.action !== "hold" || sellSignal) {
-        const exitReason = risk.action !== "hold" ? risk.reason : "signal_sell";
-        const pnl = (today.close - position.entryPrice) * position.quantity;
-        const pnlPercent = ((today.close - position.entryPrice) / position.entryPrice) * 100;
-        const holdDays = Math.max(1, Math.round((new Date(today.date).getTime() - new Date(position.entryDate).getTime()) / 86400000));
+      if (risk.action === "trailing_stop" && position.phase === "initial" && position.quantity > 1) {
+        const partialQty = Math.max(1, Math.floor(position.quantity * partialExitRatio / 100));
+        const remainingQty = position.quantity - partialQty;
+
+        if (remainingQty > 0) {
+          cash += partialQty * today.close;
+          position.quantity = remainingQty;
+          position.phase = "partial_tp";
+          position.partialExitPrice = today.close;
+          position.partialExitQty = partialQty;
+        }
+      } else if (risk.action !== "hold" || sellSignal || shouldMaxHoldSell) {
+        const exitReason = shouldMaxHoldSell
+          ? "max_hold_sell"
+          : risk.action !== "hold"
+            ? risk.reason
+            : "signal_sell";
+        const partialPnl = position.partialExitPrice && position.partialExitQty > 0
+          ? (position.partialExitPrice - position.entryPrice) * position.partialExitQty
+          : 0;
+        const finalPnl = (today.close - position.entryPrice) * position.quantity;
+        const totalQty = position.quantity + position.partialExitQty;
+        const pnl = partialPnl + finalPnl;
+        const pnlPercent = totalQty > 0 && position.entryPrice > 0
+          ? (pnl / (position.entryPrice * totalQty)) * 100
+          : 0;
 
         trades.push({
           entryDate: position.entryDate,
           entryPrice: position.entryPrice,
           exitDate: today.date,
           exitPrice: today.close,
-          quantity: position.quantity,
+          quantity: totalQty,
           pnl: Math.round(pnl),
           pnlPercent: Math.round(pnlPercent * 100) / 100,
           holdDays,
@@ -154,6 +181,9 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
             entryPrice: today.close,
             quantity,
             highSinceEntry: today.close,
+            phase: "initial",
+            partialExitPrice: null,
+            partialExitQty: 0,
             signal: signal.comment,
             patterns: patternNames,
           };
@@ -169,8 +199,14 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
   // 미청산 포지션 마지막 봉에서 강제 청산
   if (position && candles.length > 0) {
     const last = candles[candles.length - 1];
-    const pnl = (last.close - position.entryPrice) * position.quantity;
-    const pnlPercent = ((last.close - position.entryPrice) / position.entryPrice) * 100;
+    const partialPnl = position.partialExitPrice && position.partialExitQty > 0
+      ? (position.partialExitPrice - position.entryPrice) * position.partialExitQty
+      : 0;
+    const pnl = partialPnl + (last.close - position.entryPrice) * position.quantity;
+    const totalQty = position.quantity + position.partialExitQty;
+    const pnlPercent = totalQty > 0 && position.entryPrice > 0
+      ? (pnl / (position.entryPrice * totalQty)) * 100
+      : 0;
     const holdDays = Math.max(1, Math.round((new Date(last.date).getTime() - new Date(position.entryDate).getTime()) / 86400000));
 
     trades.push({
@@ -178,7 +214,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
       entryPrice: position.entryPrice,
       exitDate: last.date,
       exitPrice: last.close,
-      quantity: position.quantity,
+      quantity: totalQty,
       pnl: Math.round(pnl),
       pnlPercent: Math.round(pnlPercent * 100) / 100,
       holdDays,
@@ -272,6 +308,6 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     monthlyReturns,
     patternStats,
     equityCurve,
-    config: { stopLoss, takeProfit, trailingStop },
+    config: { stopLoss, trailingStop, partialExitRatio, maxHoldDays },
   };
 }

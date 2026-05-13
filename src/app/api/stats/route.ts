@@ -1,7 +1,7 @@
 import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 import { analyzePerformance, type Position } from "@/lib/analytics";
-import { STATS_CLOSE_TYPES } from "@/lib/engine/lifecycle";
+import { HISTORICAL_CLOSE_TYPES } from "@/lib/engine/lifecycle";
 
 // detail 문자열에서 첫 번째 pnl% 파싱: "(19.5% ≥ ..." → 19.5
 function parsePnlPct(detail: string): number | null {
@@ -28,7 +28,7 @@ async function buildPositionsFromEngineRuns(dateFilter: string | null): Promise<
 
   for (const run of data) {
     for (const action of (run.actions as EngineAction[]) ?? []) {
-      if (!STATS_CLOSE_TYPES.has(action.type) || !action.code) continue;
+      if (!HISTORICAL_CLOSE_TYPES.has(action.type) || !action.code) continue;
       const pnlPct = action.detail ? parsePnlPct(action.detail) : null;
       if (pnlPct === null) continue;
 
@@ -90,6 +90,7 @@ export async function GET(req: NextRequest) {
       exit_price: row.exit_price ? Number(row.exit_price) : null,
       exit_date: (row.exit_date as string) || null,
       exit_reason: (row.exit_reason as string) || null,
+      partial_exit_qty: row.partial_exit_qty ? Number(row.partial_exit_qty) : null,
       pnl_amount: row.pnl_amount ? Number(row.pnl_amount) : null,
       pnl_percent: row.pnl_percent ? Number(row.pnl_percent) : null,
       hold_days: row.hold_days ? Number(row.hold_days) : null,

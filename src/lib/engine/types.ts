@@ -12,13 +12,13 @@ export interface EngineConfig {
   appKey: string;
   appSecret: string;
   accountNo: string;
+  accountProductCode?: string;
   token: string;
   stopLoss: number;
-  takeProfit: number;
   trailingStop: number;
   maxPerTrade: number;
   maxDailyTrades: number;
-  takeProfitRatio: number;   // #1 익절 시 매도 비율 (0~100%)
+  partialExitRatio: number;  // #1 트레일링 부분청산 비율 (0~100%)
   dailyLossLimit: number;    // #5 일일 최대 손실 한도 (%)
   maxHoldDays: number;       // 최대 보유 기간 (일)
   dynamicRisk: boolean;      // #2 ATR 동적 손절 사용 여부
@@ -29,8 +29,24 @@ export interface EngineConfig {
   rsiSell?: number;       // RSI 매도 임계값 (기본 70)
   strongScore?: number;   // 강한 신호 점수 기준 (기본 70)
   weakScore?: number;     // 약한 신호 점수 기준 (기본 40)
+  sellRuleSensitivity?: number; // 보유 포지션 매도규칙 민감도 (1~10)
   trendingParams?: RegimeParams;  // 추세장 파라미터 (없으면 기본값 사용)
   rangingParams?: RegimeParams;   // 횡보장 파라미터
+  surgeMaxDailyEntriesPerStock?: number;
+  surgeReentryBuyRatio?: number;
+  surgeTrailingPartialExitRatio?: number;
+  surgeTightStopLoss?: number;
+  surgeTightTrailingStop?: number;
+  surgeOpenBonus?: number;
+  surgeMorningBonus?: number;
+  surgeLatePenalty?: number;
+  surgeReentryCooldownMinutes?: number;
+  surgeNewsPositiveBonus?: number;
+  surgeNewsNegativePenalty?: number;
+  surgeNewsRiskCooldownMinutes?: number;
+  learningRiskAdjustmentsEnabled?: boolean;
+  manualUsBuyNoteTemplates?: string[];
+  manualUsSellNoteTemplates?: string[];
 }
 
 export interface InvestorTrend {
@@ -47,11 +63,32 @@ export interface MarketTrend {
   label: string;
 }
 
+export interface SurgeScanMarketDiagnostic {
+  market: "J" | "Q";
+  fluctuationCount: number;
+  volumeCount: number;
+  fluctuationError?: string;
+  volumeError?: string;
+}
+
+export interface SurgeScanDiagnostic {
+  totalCandidates: number;
+  marketDiagnostics: SurgeScanMarketDiagnostic[];
+}
+
 export interface OrderResult {
   success: boolean;
   msg: string;
   ordNo?: string;
   raw?: Record<string, unknown>;
+}
+
+export interface PendingOrderFillStatus {
+  status: "filled" | "partial" | "open" | "not_found" | "error";
+  filledQty: number;
+  remainingQty: number;
+  filledPrice: number;
+  detail?: string;
 }
 
 export interface FilterResult {
@@ -84,6 +121,9 @@ export interface KISPriceOutput {
   mang_issu_yn?: string; // 관리종목 여부
   mrkt_warn_cls_code?: string; // 시장경고 코드
   lstg_date?: string;   // 상장일
+  __error_message?: string; // 조회 실패 시 내부 진단 메시지
+  __error_code?: string;    // KIS msg_cd / rt_cd
+  __http_status?: string;   // HTTP status
   [key: string]: string | undefined;
 }
 
@@ -109,10 +149,12 @@ export interface StepContext {
   config: EngineConfig;
   applied: import("@/lib/learning").AppliedLearning;
   maxPerTrade: number;
+  totalCapital: number;
+  availableCash: number;
   maxDailyTrades: number;
   maxPositions: number;
   maxPerSector: number;  // 섹터당 최대 보유 종목 수 (0이면 비활성)
-  takeProfitRatio: number;
+  partialExitRatio: number;
   dailyLossLimit: number;
   strongScore: number;    // 강한 신호 점수 기준
   weakScore: number;      // 약한 신호 점수 기준

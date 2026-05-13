@@ -373,7 +373,7 @@ export function analyzeSignalWithWeights(
 
 // ─── 손절/익절/트레일링 스탑 판단 ────────────────
 export interface RiskCheckResult {
-  action: "stop_loss" | "take_profit" | "trailing_stop" | "hold";
+  action: "stop_loss" | "trailing_stop" | "hold";
   reason: string;
   currentPnlRate: number;
 }
@@ -383,7 +383,6 @@ export function checkRisk(
   currentPrice: number,
   highSinceBuy: number,
   stopLoss: number,
-  takeProfit: number,
   trailingStop: number
 ): RiskCheckResult {
   const pnlRate = ((currentPrice - avgPrice) / avgPrice) * 100;
@@ -391,9 +390,6 @@ export function checkRisk(
 
   if (pnlRate <= stopLoss) {
     return { action: "stop_loss", reason: `손절 (${pnlRate.toFixed(1)}% ≤ ${stopLoss.toFixed(1)}%)`, currentPnlRate: pnlRate };
-  }
-  if (pnlRate >= takeProfit) {
-    return { action: "take_profit", reason: `익절 (${pnlRate.toFixed(1)}% ≥ +${takeProfit.toFixed(1)}%)`, currentPnlRate: pnlRate };
   }
   if (pnlRate > 0 && fromHigh <= trailingStop) {
     return { action: "trailing_stop", reason: `트레일링 (고점 대비 ${fromHigh.toFixed(1)}% ≤ ${trailingStop.toFixed(1)}%)`, currentPnlRate: pnlRate };

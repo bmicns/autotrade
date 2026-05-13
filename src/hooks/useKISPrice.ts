@@ -25,7 +25,7 @@ export function useKISPrice() {
   const [loading, setLoading] = useState(false);
 
   const fetchPrice = useCallback(async (code: string): Promise<KISPriceOutput | null> => {
-    const { appKey, appSecret, token, accountNo } = kisConfig;
+    const { appKey, appSecret, token, accountNo, accountProductCode } = kisConfig;
     if (!appKey || !appSecret || !token) return null;
 
     try {
@@ -38,6 +38,7 @@ export function useKISPrice() {
           appSecret,
           token,
           accountNo: accountNo || "",
+          accountProductCode: accountProductCode || "01",
         }),
       });
       if (res.status === 400) return null;

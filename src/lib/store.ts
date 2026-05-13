@@ -1,9 +1,11 @@
 import { create } from "zustand";
 import { fetchBalance, fetchPrices } from "./kis/client";
-import { loadFromStorage, saveToStorage } from "@/lib/browser-storage";
+import { loadFromStorage, removeFromStorage, saveToStorage } from "@/lib/browser-storage";
 import { startKisHealthPolling, stopKisHealthPolling } from "@/lib/kis/health-poller";
+import type { EngineControlSnapshot } from "@/lib/engine/control";
 
 type Tab = "home" | "signal" | "portfolio" | "stats" | "strategy" | "settings";
+type MarketScope = "kr" | "us";
 
 export interface Holding {
   code: string;
@@ -44,6 +46,7 @@ export interface KISConfig {
   appKey: string;
   appSecret: string;
   accountNo: string;
+  accountProductCode?: string;
   token?: string;
   tokenExpiry?: string;
   source?: "env" | "db" | null;
@@ -54,11 +57,8 @@ export interface KISConfig {
 }
 
 export interface TradeSettings {
-  maxAmountPerTrade: number;    // 1회 매매 한도 (만원)
   maxTradesPerDay: number;      // 1일 최대 횟수
   stopLoss: number;             // 손절 라인 (%)
-  takeProfit: number;           // 1차 익절 (%)
-  takeProfitRatio: number;      // 익절 비율 (%)
   trailingStop: number;         // 트레일링 스탑 (%)
   morningStart: string;         // 오전 세션 시작
   morningEnd: string;           // 오전 세션 종료
@@ -78,6 +78,8 @@ interface AccountSummary {
 interface AppState {
   tab: Tab;
   setTab: (tab: Tab) => void;
+  marketScope: MarketScope;
+  setMarketScope: (scope: MarketScope) => void;
 
   autoTrade: boolean;
   toggleAutoTrade: () => void;
@@ -129,6 +131,32 @@ interface AppState {
   hydrate: () => void;
 }
 
+const DEFAULT_TRADE_SETTINGS: TradeSettings = {
+  maxTradesPerDay: 5,
+  stopLoss: 5,
+  trailingStop: 3,
+  dailyLossLimit: 3,
+  maxHoldDays: 5,
+  morningStart: "09:30",
+  morningEnd: "11:30",
+  afternoonStart: "13:00",
+  afternoonEnd: "14:50",
+};
+
+function mapEngineControlToTradeSettings(snapshot: Partial<EngineControlSnapshot>): TradeSettings {
+  return {
+    maxTradesPerDay: snapshot.max_trades_per_day ?? DEFAULT_TRADE_SETTINGS.maxTradesPerDay,
+    stopLoss: snapshot.stop_loss ?? DEFAULT_TRADE_SETTINGS.stopLoss,
+    trailingStop: snapshot.trailing_stop ?? DEFAULT_TRADE_SETTINGS.trailingStop,
+    dailyLossLimit: snapshot.daily_loss_limit ?? DEFAULT_TRADE_SETTINGS.dailyLossLimit,
+    maxHoldDays: snapshot.max_hold_days ?? DEFAULT_TRADE_SETTINGS.maxHoldDays,
+    morningStart: snapshot.morning_start ?? DEFAULT_TRADE_SETTINGS.morningStart,
+    morningEnd: snapshot.morning_end ?? DEFAULT_TRADE_SETTINGS.morningEnd,
+    afternoonStart: snapshot.afternoon_start ?? DEFAULT_TRADE_SETTINGS.afternoonStart,
+    afternoonEnd: snapshot.afternoon_end ?? DEFAULT_TRADE_SETTINGS.afternoonEnd,
+  };
+}
+
 async function hasOpenPositions(): Promise<boolean> {
   try {
     const res = await fetch("/api/positions");
@@ -138,6 +166,11 @@ async function hasOpenPositions(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function clearCachedHoldings() {
+  removeFromStorage("nx-holdings");
+  removeFromStorage("nx-account-summary");
 }
 
 function getFallbackSummary(holdings: Holding[], summary: AccountSummary): AccountSummary {
@@ -159,20 +192,21 @@ function getFallbackSummary(holdings: Holding[], summary: AccountSummary): Accou
 export const useAppStore = create<AppState>((set, get) => ({
   tab: "home",
   setTab: (tab) => set({ tab }),
+  marketScope: "kr",
+  setMarketScope: (marketScope) => {
+    saveToStorage("nx-market-scope", marketScope);
+    set({ marketScope });
+  },
 
   autoTrade: true,
   toggleAutoTrade: () => set((s) => ({ autoTrade: !s.autoTrade })),
 
   holdings: [],
   addHolding: (h) => {
-    const next = [...get().holdings, h];
-    saveToStorage("nx-holdings", next);
-    set({ holdings: next });
+    set({ holdings: [...get().holdings, h] });
   },
   removeHolding: (code) => {
-    const next = get().holdings.filter((x) => x.code !== code);
-    saveToStorage("nx-holdings", next);
-    set({ holdings: next });
+    set({ holdings: get().holdings.filter((x) => x.code !== code) });
   },
 
   prices: new Map(),
@@ -189,26 +223,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ trades: next });
   },
 
-  tradeSettings: loadFromStorage<TradeSettings>("nx-trade-settings", {
-    maxAmountPerTrade: 100,
-    maxTradesPerDay: 5,
-    stopLoss: 5,
-    takeProfit: 5,
-    takeProfitRatio: 50,
-    trailingStop: 3,
-    dailyLossLimit: 3,
-    maxHoldDays: 5,
-    morningStart: "09:30",
-    morningEnd: "11:30",
-    afternoonStart: "13:00",
-    afternoonEnd: "14:50",
-  }),
+  tradeSettings: loadFromStorage<TradeSettings>("nx-trade-settings", DEFAULT_TRADE_SETTINGS),
   setTradeSettings: (s) => {
     saveToStorage("nx-trade-settings", s);
     set({ tradeSettings: s });
   },
 
-  kisConfig: { appKey: "", appSecret: "", accountNo: "" },
+  kisConfig: { appKey: "", appSecret: "", accountNo: "", accountProductCode: "01" },
   setKISConfig: (c) => {
     saveToStorage("nx-kis", c);
     set({ kisConfig: c });
@@ -306,13 +327,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       if (balance) {
-        const cachedHoldings = loadFromStorage<Holding[]>("nx-holdings", []);
-        const cachedSummary = loadFromStorage<AccountSummary>("nx-account-summary", {
-          totalEval: 0,
-          totalPnl: 0,
-          totalPnlRate: 0,
-          cashBalance: 0,
-        });
+        const cachedHoldings = get().holdings;
+        const cachedSummary: AccountSummary = {
+          totalEval: get().totalEval,
+          totalPnl: get().totalPnl,
+          totalPnlRate: get().totalPnlRate,
+          cashBalance: get().cashBalance,
+        };
 
         // KIS 연결 성공 → 더미 제거, KIS 잔고만 표시
         const holdings: Holding[] = balance.holdings.map((h) => ({
@@ -356,8 +377,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? { ...cachedSummary }
             : summary;
 
-        saveToStorage("nx-holdings", holdings);
-        saveToStorage("nx-account-summary", summaryToSave);
+        clearCachedHoldings();
         set({ holdings, ...summaryToSave, kisConnected: true });
 
         // 보유 종목이 있으면 시세도 조회
@@ -384,9 +404,17 @@ export const useAppStore = create<AppState>((set, get) => ({
           } catch { /* 캔들 조회 실패 무시 */ }
         }
       } else {
+        if (!(await hasOpenPositions())) {
+          clearCachedHoldings();
+          set({ holdings: [] });
+        }
         set({ kisConnected: false });
       }
     } catch {
+      if (!(await hasOpenPositions())) {
+        clearCachedHoldings();
+        set({ holdings: [] });
+      }
       set({ kisConnected: false });
     } finally {
       set({ kisLoading: false });
@@ -394,30 +422,43 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   hydrate: async () => {
-    const holdings = loadFromStorage("nx-holdings", []);
+    const marketScope = loadFromStorage<MarketScope>("nx-market-scope", "kr");
     const trades = loadFromStorage<Trade[]>("nx-trades", []);
-    const summary = loadFromStorage<AccountSummary>("nx-account-summary", {
-      totalEval: 0,
-      totalPnl: 0,
-      totalPnlRate: 0,
-      cashBalance: 0,
-    });
+    clearCachedHoldings();
 
     // KIS 설정: Supabase 우선, 없으면 localStorage 폴백
-    let kisConfig = loadFromStorage<KISConfig>("nx-kis", { appKey: "", appSecret: "", accountNo: "" });
+    let kisConfig = loadFromStorage<KISConfig>("nx-kis", { appKey: "", appSecret: "", accountNo: "", accountProductCode: "01" });
     try {
       const res = await fetch("/api/kis/config");
       if (res.ok) {
         const remote = await res.json();
         if (remote.appKey) {
-          kisConfig = remote;
+          kisConfig = { accountProductCode: "01", ...remote };
           saveToStorage("nx-kis", kisConfig);
         }
       }
     } catch { /* localStorage 폴백 */ }
 
-    const tradeSettings = loadFromStorage<TradeSettings>("nx-trade-settings", get().tradeSettings);
-    set({ holdings, trades, kisConfig, tradeSettings, ...summary });
+    let tradeSettings = loadFromStorage<TradeSettings>("nx-trade-settings", get().tradeSettings);
+    try {
+      const res = await fetch("/api/engine-control");
+      if (res.ok) {
+        const remote = await res.json() as Partial<EngineControlSnapshot>;
+        tradeSettings = mapEngineControlToTradeSettings(remote);
+        saveToStorage("nx-trade-settings", tradeSettings);
+      }
+    } catch { /* localStorage 폴백 */ }
+    set({
+      holdings: [],
+      trades,
+      kisConfig,
+      tradeSettings,
+      marketScope,
+      totalEval: 0,
+      totalPnl: 0,
+      totalPnlRate: 0,
+      cashBalance: 0,
+    });
 
     // appKey가 있으면 자동으로 KIS 데이터 로드 + 헬스 폴링 시작
     if (kisConfig.appKey && kisConfig.appSecret && kisConfig.accountNo) {

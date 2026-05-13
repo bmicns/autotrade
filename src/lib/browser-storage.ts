@@ -16,3 +16,12 @@ export function saveToStorage(key: string, value: unknown) {
     // Ignore storage errors.
   }
 }
+
+export function removeFromStorage(key: string) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Ignore storage errors.
+  }
+}

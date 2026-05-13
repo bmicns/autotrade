@@ -10,6 +10,20 @@ export interface KstNowParts {
   timeLabel: string;
 }
 
+const LEGACY_MARKET_WINDOWS = {
+  morningStart: "09:30",
+  morningEnd: "11:30",
+  afternoonStart: "13:00",
+  afternoonEnd: "14:50",
+} as const;
+
+const KRX_CONTINUOUS_MARKET_WINDOWS = {
+  morningStart: "09:00",
+  morningEnd: "15:20",
+  afternoonStart: "15:21",
+  afternoonEnd: "15:21",
+} as const;
+
 export function getKstNowParts(now = new Date()): KstNowParts {
   const kstNow = new Date(now.getTime() + 9 * 3600000);
   const year = kstNow.getUTCFullYear();
@@ -36,6 +50,25 @@ export function parseHHMM(value: unknown, fallback: string): number {
   const str = value ? String(value) : fallback;
   const [h, m] = str.split(":").map(Number);
   return (h || 0) * 100 + (m || 0);
+}
+
+export function resolveEffectiveMarketWindows(cfgMap: Map<string, unknown>) {
+  const morningStart = String(cfgMap.get("morning_start") ?? LEGACY_MARKET_WINDOWS.morningStart);
+  const morningEnd = String(cfgMap.get("morning_end") ?? LEGACY_MARKET_WINDOWS.morningEnd);
+  const afternoonStart = String(cfgMap.get("afternoon_start") ?? LEGACY_MARKET_WINDOWS.afternoonStart);
+  const afternoonEnd = String(cfgMap.get("afternoon_end") ?? LEGACY_MARKET_WINDOWS.afternoonEnd);
+
+  const isLegacySplitWindow =
+    morningStart === LEGACY_MARKET_WINDOWS.morningStart &&
+    morningEnd === LEGACY_MARKET_WINDOWS.morningEnd &&
+    afternoonStart === LEGACY_MARKET_WINDOWS.afternoonStart &&
+    afternoonEnd === LEGACY_MARKET_WINDOWS.afternoonEnd;
+
+  if (isLegacySplitWindow) {
+    return KRX_CONTINUOUS_MARKET_WINDOWS;
+  }
+
+  return { morningStart, morningEnd, afternoonStart, afternoonEnd };
 }
 
 export function parseMarketHolidays(raw: unknown): string[] {
@@ -110,9 +143,16 @@ export function getEngineSkipReason(cfgMap: Map<string, unknown>, now = new Date
   if (closureReason) return closureReason;
 
   const parts = getKstNowParts(now);
-  const mStart = parseHHMM(cfgMap.get("morning_start"), "09:30");
-  const mEnd = parseHHMM(cfgMap.get("morning_end"), "15:20");
-  if (parts.hhmm < mStart || parts.hhmm > mEnd) {
+  const windows = resolveEffectiveMarketWindows(cfgMap);
+  const mStart = parseHHMM(windows.morningStart, KRX_CONTINUOUS_MARKET_WINDOWS.morningStart);
+  const mEnd = parseHHMM(windows.morningEnd, KRX_CONTINUOUS_MARKET_WINDOWS.morningEnd);
+  const aStart = parseHHMM(windows.afternoonStart, KRX_CONTINUOUS_MARKET_WINDOWS.afternoonStart);
+  const aEnd = parseHHMM(windows.afternoonEnd, KRX_CONTINUOUS_MARKET_WINDOWS.afternoonEnd);
+
+  const inMorning = parts.hhmm >= mStart && parts.hhmm <= mEnd;
+  const inAfternoon = parts.hhmm >= aStart && parts.hhmm <= aEnd;
+
+  if (!inMorning && !inAfternoon) {
     return `장 외 시간 (${parts.timeLabel})`;
   }
 

@@ -49,3 +49,10 @@ npm run check:engine
 - Supabase 환경변수가 없으면 관련 API 호출 시 명확한 에러를 반환하도록 되어 있습니다.
 - KIS 환경변수가 없으면 엔진 및 시세 주문 관련 API는 정상 동작하지 않습니다.
 - KIS 런타임 자격증명은 `kis_config` DB를 우선 사용하고, `KIS_*` env는 DB 복구용 폴백으로만 사용합니다.
+
+## Environment Strategy
+
+- 운영 무영향 구조 개편은 `dev / paper / prod` 3계층으로 분리해서 진행합니다.
+- `dev`는 로컬 구조 개편 전용, `paper`는 모의투자 검증 전용, `prod`는 승인된 변경만 반영합니다.
+- 자세한 기준은 [docs/operations/environment-separation.md](docs/operations/environment-separation.md) 문서를 따릅니다.
+- `engine-v2`를 `paper`로 넘기기 전 체크는 [docs/operations/paper-promotion-checklist.md](docs/operations/paper-promotion-checklist.md) 문서를 따릅니다.

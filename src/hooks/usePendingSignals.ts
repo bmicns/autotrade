@@ -86,5 +86,71 @@ export function usePendingSignals() {
     } catch { return false; }
   }, []);
 
-  return { signals, recentSignals, filterLogs, dartCodes, fetchSignals, fetchEngineLog, approveSignal, rejectSignal, expireSignal };
+  const bulkBuySignals = useCallback(async (): Promise<{
+    ok: boolean;
+    approvedCount: number;
+    failedCount: number;
+    error?: string;
+  }> => {
+    try {
+      const res = await fetch("/api/pending-signals/bulk-buy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return {
+          ok: false,
+          approvedCount: 0,
+          failedCount: 0,
+          error: String(data?.error || "일괄매수 실패"),
+        };
+      }
+      return {
+        ok: true,
+        approvedCount: Number(data?.approvedCount ?? 0),
+        failedCount: Number(data?.failedCount ?? 0),
+      };
+    } catch {
+      return {
+        ok: false,
+        approvedCount: 0,
+        failedCount: 0,
+        error: "일괄매수 요청 전송 중 오류가 발생했습니다.",
+      };
+    }
+  }, []);
+
+  const bulkApproveSignals = useCallback(async (): Promise<{
+    ok: boolean;
+    approvedCount: number;
+    error?: string;
+  }> => {
+    try {
+      const res = await fetch("/api/pending-signals/bulk-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return {
+          ok: false,
+          approvedCount: 0,
+          error: String(data?.error || "일괄 승인 실패"),
+        };
+      }
+      return {
+        ok: true,
+        approvedCount: Number(data?.approvedCount ?? 0),
+      };
+    } catch {
+      return {
+        ok: false,
+        approvedCount: 0,
+        error: "일괄 승인 요청 전송 중 오류가 발생했습니다.",
+      };
+    }
+  }, []);
+
+  return { signals, recentSignals, filterLogs, dartCodes, fetchSignals, fetchEngineLog, approveSignal, rejectSignal, expireSignal, bulkBuySignals, bulkApproveSignals };
 }
