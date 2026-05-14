@@ -23,6 +23,8 @@ interface EngineStateResponse {
     engineEnabled: boolean;
     engineLocked: boolean;
     engineLockAt: string | null;
+    engineLockStale: boolean;
+    engineLockAgeMinutes: number | null;
     environment: "dev" | "paper" | "prod";
     kisRuntime: {
       mode: string;
@@ -49,6 +51,7 @@ interface EngineStateResponse {
     recentLifecycleRiskCount: number;
     recentManualOrderCount: number;
     recentTimeoutCleanupCount: number;
+    recentStaleCleanupCount: number;
     recentOrderFailureCount: number;
     todayTradeCount: number;
     todayRealizedPnl: number;

@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase/api-client";
 import { sendDailyReport } from "@/lib/engine/notify";
+import { requireCronBearerAuth } from "@/lib/request-guard";
 
 // GET /api/daily-report — 크론 전용 (middleware.ts CRON_ROUTES)
 // 수동 트리거가 필요한 경우 대시보드 UI에서 세션 인증 후 직접 호출하는 별도 엔드포인트 추가 고려
-export async function GET() {
+export async function GET(req: Request) {
+  const guard = requireCronBearerAuth(req);
+  if (guard) return guard;
+
   const kstNow = new Date(Date.now() + 9 * 3600000);
   const today = kstNow.toISOString().slice(0, 10);
 

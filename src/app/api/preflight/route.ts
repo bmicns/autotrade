@@ -283,6 +283,14 @@ export async function GET() {
       if (eventType === "manual_buy_queued" && !rehearsalEvidence.manual_buy) rehearsalEvidence.manual_buy = createdAt;
       if (eventType === "manual_sell_executed" && !rehearsalEvidence.manual_sell) rehearsalEvidence.manual_sell = createdAt;
       if (eventType === "position_reconciled" && !rehearsalEvidence.reconcile) rehearsalEvidence.reconcile = createdAt;
+      if (
+        ["position_opened", "buy", "approved_buy", "split_buy_1", "split_buy_2", "surge_buy", "surge_reentry_buy"].includes(eventType)
+        && !rehearsalEvidence.auto_entry
+      ) {
+        const source = typeof row.payload?.source === "string" ? row.payload.source : null;
+        const signalSource = typeof row.payload?.signal_source === "string" ? row.payload.signal_source : null;
+        if (source !== "manual_buy" && signalSource !== "manual") rehearsalEvidence.auto_entry = createdAt;
+      }
       if (eventType === "position_closed") {
         const exitReason = typeof row.payload?.exit_reason === "string" ? row.payload.exit_reason : null;
         if (exitReason === "manual_sell" && !rehearsalEvidence.manual_sell) rehearsalEvidence.manual_sell = createdAt;

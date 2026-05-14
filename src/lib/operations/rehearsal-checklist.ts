@@ -10,6 +10,7 @@ export type RehearsalEvidenceMap = Partial<Record<string, string>>;
 export const DEFAULT_REHEARSAL_ITEMS: RehearsalChecklistItem[] = [
   { key: "manual_buy", label: "수동매수 1건", checked: false, checkedAt: null },
   { key: "manual_sell", label: "수동매도 1건", checked: false, checkedAt: null },
+  { key: "auto_entry", label: "자동 진입 1건", checked: false, checkedAt: null },
   { key: "auto_exit", label: "자동 청산 1건", checked: false, checkedAt: null },
   { key: "reconcile", label: "리컨실 1건", checked: false, checkedAt: null },
   { key: "telegram", label: "텔레그램 알림 확인", checked: false, checkedAt: null },

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { recordEngineEvent } from "@/lib/engine/event-log";
 import { getEngineLockState, isEngineEnabled } from "@/lib/engine/app-config";
 import { sendManualBuyQueuedAlert } from "@/lib/engine/notify";
+import { requireSessionWriteRequest } from "@/lib/request-guard";
 
 const MAX_QTY = 10_000;
 
@@ -13,6 +14,9 @@ interface ManualBuyItem {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = requireSessionWriteRequest(req);
+  if (guard) return guard;
+
   try {
     const supabaseError = getSupabaseConfigError();
     if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });

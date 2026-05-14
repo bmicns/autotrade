@@ -25,6 +25,8 @@ export interface EngineStateSnapshot {
     engineEnabled: boolean;
     engineLocked: boolean;
     engineLockAt: string | null;
+    engineLockStale: boolean;
+    engineLockAgeMinutes: number | null;
     environment: "dev" | "paper" | "prod";
     kisRuntime: {
       mode: string;
@@ -51,6 +53,7 @@ export interface EngineStateSnapshot {
     recentLifecycleRiskCount: number;
     recentManualOrderCount: number;
     recentTimeoutCleanupCount: number;
+    recentStaleCleanupCount: number;
     recentOrderFailureCount: number;
     todayTradeCount: number;
     todayRealizedPnl: number;
@@ -91,6 +94,8 @@ export function buildEngineStateSnapshotFromRows(params: {
       engineEnabled: true,
       engineLocked: false,
       engineLockAt: null,
+      engineLockStale: false,
+      engineLockAgeMinutes: null,
       environment: "dev",
       kisRuntime: {
         mode: "paper",
@@ -108,6 +113,7 @@ export function buildEngineStateSnapshotFromRows(params: {
       ...summarizeEngineState({ openPositions, pendingOrders, pendingSignals }),
       recentLifecycleRiskCount: Number(params.summary?.recentLifecycleRiskCount) || 0,
       recentManualOrderCount: Number(params.summary?.recentManualOrderCount) || 0,
+      recentStaleCleanupCount: Number(params.summary?.recentStaleCleanupCount) || 0,
       todayTradeCount: Number(params.summary?.todayTradeCount) || 0,
       todayRealizedPnl: Number(params.summary?.todayRealizedPnl) || 0,
       brokerMismatchCount: Number(params.summary?.brokerMismatchCount) || 0,

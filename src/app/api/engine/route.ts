@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { loadLatestLearning, applyLearning, buildLearningRiskAdjustments } from "@/lib/learning";
 import { type EngineConfig, type StepContext } from "@/lib/engine/types";
 import { resolveAvailableCash, resolveBalanceCashAmount } from "@/lib/engine/balance-summary";
-import { logEngineRun, reconcileBrokerPositionDrift, syncBrokerHoldingsToPositions } from "@/lib/engine/db";
+import { cleanupStalePendingOrders, logEngineRun, reconcileBrokerPositionDrift, syncBrokerHoldingsToPositions } from "@/lib/engine/db";
 import { supabase } from "@/lib/supabase/api-client";
 import { runStep0, runStep1, runStep15 } from "@/lib/engine/steps";
 import { END_OF_DAY_TIME, ENGINE_CONSECUTIVE_ERROR_HALT_COUNT, ENGINE_CONSECUTIVE_TOKEN_ERROR_HALT_COUNT } from "@/lib/engine/constants";
@@ -23,7 +23,9 @@ import { resolveKisAccessToken } from "@/lib/kis/runtime-token";
 import { validateRequiredEnv } from "@/lib/config-validator";
 import { withRetry } from "@/lib/engine/retry";
 import { applyEngineAppConfig, DEFAULT_ENGINE_CONFIG, readEngineControlSnapshot } from "@/lib/engine/control";
+import { resolveEngineLockState } from "@/lib/engine/recovery";
 import { resolveRecentFailureHalt } from "@/lib/engine/run-health";
+import { requireCronBearerAuth } from "@/lib/request-guard";
 
 async function loadRecentFailureHaltReason(): Promise<string | null> {
   const { data } = await supabase
@@ -151,7 +153,7 @@ async function cleanupStaleSignals() {
 
 // ─── Cron GET ───────────────────────────────────
 // 인증은 middleware.ts CRON_ROUTES에서 처리됨
-export async function GET() {
+export async function runEngineRequest() {
   // 1. 환경변수 검증
   const envCheck = validateRequiredEnv();
   if (!envCheck.ok) {
@@ -168,11 +170,17 @@ export async function GET() {
     .select("value")
     .eq("key", "engine_lock")
     .maybeSingle();
-  if (lockRow?.value) {
-    const lockTime = new Date(lockRow.value as string).getTime();
-    if (Date.now() - lockTime < 5 * 60 * 1000) {
-      return NextResponse.json({ skipped: true, reason: `engine_lock: 이미 실행 중 (since: ${lockRow.value})` });
-    }
+  const recoveryActions: Array<{ type: string; code: string; detail: string }> = [];
+  const lockState = resolveEngineLockState(lockRow?.value);
+  if (lockState.locked && lockState.lockedAt) {
+    return NextResponse.json({ skipped: true, reason: `engine_lock: 이미 실행 중 (since: ${lockState.lockedAt})` });
+  }
+  if (lockState.stale && lockState.lockedAt) {
+    recoveryActions.push({
+      type: "stale_lock_recovered",
+      code: "",
+      detail: `stale engine_lock 자동 회복 · ${lockState.ageMinutes ?? "?"}분 경과`,
+    });
   }
 
   // 3. 엔진 락 획득
@@ -182,13 +190,21 @@ export async function GET() {
   try {
     // 4. cleanupStaleSignals (기존)
     await cleanupStaleSignals();
+    const stalePendingOrderCleanup = await cleanupStalePendingOrders();
+    if (stalePendingOrderCleanup.cleanedCount > 0) {
+      recoveryActions.push({
+        type: "stale_pending_orders_cleaned",
+        code: "",
+        detail: `stale pending order 자동 정리 ${stalePendingOrderCleanup.cleanedCount}건`,
+      });
+    }
     
     // 5. getEngineSkipReason (기존)
     const { data: appConfigs } = await supabase.from("app_config").select("key, value");
     const cfgMap = new Map((appConfigs || []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
     const skipReason = getEngineSkipReason(cfgMap);
     if (skipReason) {
-      await logEngineRun(0, [{ type: "skipped", code: "", detail: skipReason }], 0, 0);
+      await logEngineRun(0, [...recoveryActions, { type: "skipped", code: "", detail: skipReason }], 0, 0);
       return NextResponse.json({ skipped: true, reason: skipReason });
     }
 
@@ -196,7 +212,7 @@ export async function GET() {
     const resolved = await resolveKisCredentials();
     if (!resolved.ok) {
       const detail = `KIS 토큰 발급 실패: ${resolved.detail}`;
-      await logEngineRun(0, [{ type: "token_error", code: "", detail }], 0, 0, detail);
+      await logEngineRun(0, [...recoveryActions, { type: "token_error", code: "", detail }], 0, 0, detail);
       return NextResponse.json({ error: "토큰 발급 실패", detail: resolved.detail }, { status: 500 });
     }
 
@@ -213,12 +229,19 @@ export async function GET() {
     };
 
     // 7. 엔진 실행
-    return await runEngine(config);
+    return await runEngine(config, recoveryActions);
   } finally {
     // 8. 락 해제 (정상 완료 / 오류 모두)
     const releaseTime = new Date().toISOString();
     try { await supabase.from("app_config").upsert({ key: "engine_lock", value: "", updated_at: releaseTime }); } catch { /* ignore */ }
   }
+}
+
+export async function GET(req: Request) {
+  const guard = requireCronBearerAuth(req);
+  if (guard) return guard;
+
+  return runEngineRequest();
 }
 
 // KOSPI 등락률 기준 추세장 판정 임계값 (일평균 변동률 고려: 0.5%면 확실한 상승 모멘텀)
@@ -292,7 +315,10 @@ async function runEndOfDay(
 }
 
 // ─── 엔진 오케스트레이터 ─────────────────────────
-async function runEngine(config: EngineConfig) {
+async function runEngine(
+  config: EngineConfig,
+  recoveryActions: Array<{ type: string; code: string; detail: string }> = [],
+) {
   const startTime = Date.now();
   let scannedCount = 0;
 
@@ -302,13 +328,13 @@ async function runEngine(config: EngineConfig) {
 
     const skipReason = getEngineSkipReason(cfgMap);
     if (skipReason) {
-      await logEngineRun(0, [{ type: "skipped", code: "", detail: skipReason }], 0, 0);
+      await logEngineRun(0, [...recoveryActions, { type: "skipped", code: "", detail: skipReason }], 0, 0);
       return NextResponse.json({ skipped: true, reason: skipReason });
     }
 
     const failureHaltReason = await loadRecentFailureHaltReason();
     if (failureHaltReason) {
-      await logEngineRun(0, [{ type: "risk_halt", code: "", detail: failureHaltReason }], 0, 0, failureHaltReason);
+      await logEngineRun(0, [...recoveryActions, { type: "risk_halt", code: "", detail: failureHaltReason }], 0, 0, failureHaltReason);
       await sendEngineErrorAlert(`자동 정지: ${failureHaltReason}`, 0).catch(() => {});
       return NextResponse.json({ halted: true, reason: failureHaltReason }, { status: 503 });
     }
@@ -454,7 +480,7 @@ async function runEngine(config: EngineConfig) {
     }
     if (step0.halted) {
       const durationMs = Date.now() - startTime;
-      await logEngineRun(0, [...pretradeReconcileActions, ...step0.actions], 0, durationMs);
+      await logEngineRun(0, [...recoveryActions, ...pretradeReconcileActions, ...step0.actions], 0, durationMs);
       return NextResponse.json({ timestamp: new Date().toISOString(), tradeCount: 0, halted: true, reason: step0.haltReason });
     }
 
@@ -483,6 +509,7 @@ async function runEngine(config: EngineConfig) {
       if (postStep1MismatchCount > 0) {
         const reason = `브로커-DB 정합성 불일치 ${postStep1MismatchCount}건`;
         const actions = [
+          ...recoveryActions,
           ...pretradeReconcileActions,
           ...step0.actions,
           ...step1.actions,
@@ -557,7 +584,7 @@ async function runEngine(config: EngineConfig) {
       const durationMs = Date.now() - startTime;
       await logEngineRun(
         tradeCount,
-        [...pretradeReconcileActions, ...step0.actions, ...step1.actions, ...(reconcileRecoveryAction ? [reconcileRecoveryAction] : []), ...actions],
+        [...recoveryActions, ...pretradeReconcileActions, ...step0.actions, ...step1.actions, ...(reconcileRecoveryAction ? [reconcileRecoveryAction] : []), ...actions],
         0,
         durationMs,
         reason,
@@ -605,6 +632,7 @@ async function runEngine(config: EngineConfig) {
       detail: learningRiskEnabled ? "학습 리스크 보정 ON" : "학습 리스크 보정 OFF",
     };
     const allActions = [
+      ...recoveryActions,
       learningRiskAction,
       ...pretradeReconcileActions,
       ...step0.actions,

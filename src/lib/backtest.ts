@@ -3,7 +3,19 @@
  * 과거 캔들 데이터로 현재 전략을 시뮬레이션하여 성과 측정
  */
 
-import { analyzeSignal, checkRisk, type DailyCandle } from "@/lib/kis/indicators";
+import { analyzeSignal, checkRisk, type DailyCandle } from "./kis/indicators";
+import {
+  DEFAULT_BUY_FEE_RATE,
+  DEFAULT_BUY_SLIPPAGE_RATE,
+  DEFAULT_SELL_FEE_RATE,
+  DEFAULT_SELL_SLIPPAGE_RATE,
+  DEFAULT_SELL_TAX_RATE,
+  applyBuyExecution,
+  applySellExecution,
+  calcBuyCost,
+  calcSellProceeds,
+  roundMoney,
+} from "./backtest-costs";
 
 // ─── 타입 ──────────────────────────────────────
 
@@ -17,6 +29,11 @@ export interface BacktestConfig {
   partialExitRatio: number;
   maxHoldDays: number;
   maxPerTrade: number;    // 최대 매수 금액
+  buyFeeRate?: number;
+  sellFeeRate?: number;
+  sellTaxRate?: number;
+  buySlippageRate?: number;
+  sellSlippageRate?: number;
 }
 
 export interface BacktestTrade {
@@ -52,7 +69,15 @@ export interface BacktestResult {
   patternStats: { pattern: string; count: number; winRate: number; avgPnl: number }[];
   equityCurve: { date: string; equity: number }[];
   config: { stopLoss: number; trailingStop: number; partialExitRatio: number; maxHoldDays: number };
+  realism: {
+    buyFeeRate: number;
+    sellFeeRate: number;
+    sellTaxRate: number;
+    buySlippageRate: number;
+    sellSlippageRate: number;
+  };
 }
+
 
 // ─── 백테스트 실행 ─────────────────────────────
 
@@ -60,6 +85,11 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
   const {
     stockCode, stockName = stockCode, candles, initialCash,
     stopLoss, trailingStop, partialExitRatio, maxHoldDays, maxPerTrade,
+    buyFeeRate = DEFAULT_BUY_FEE_RATE,
+    sellFeeRate = DEFAULT_SELL_FEE_RATE,
+    sellTaxRate = DEFAULT_SELL_TAX_RATE,
+    buySlippageRate = DEFAULT_BUY_SLIPPAGE_RATE,
+    sellSlippageRate = DEFAULT_SELL_SLIPPAGE_RATE,
   } = config;
 
   const trades: BacktestTrade[] = [];
@@ -115,10 +145,12 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         const remainingQty = position.quantity - partialQty;
 
         if (remainingQty > 0) {
-          cash += partialQty * today.close;
+          const partialExitPrice = applySellExecution(today.close, sellSlippageRate);
+          const partialSettlement = calcSellProceeds(partialExitPrice, partialQty, sellFeeRate, sellTaxRate);
+          cash += partialSettlement.net;
           position.quantity = remainingQty;
           position.phase = "partial_tp";
-          position.partialExitPrice = today.close;
+          position.partialExitPrice = partialExitPrice;
           position.partialExitQty = partialQty;
         }
       } else if (risk.action !== "hold" || sellSignal || shouldMaxHoldSell) {
@@ -130,9 +162,11 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         const partialPnl = position.partialExitPrice && position.partialExitQty > 0
           ? (position.partialExitPrice - position.entryPrice) * position.partialExitQty
           : 0;
-        const finalPnl = (today.close - position.entryPrice) * position.quantity;
+        const exitPrice = applySellExecution(today.close, sellSlippageRate);
+        const finalPnl = (exitPrice - position.entryPrice) * position.quantity;
         const totalQty = position.quantity + position.partialExitQty;
-        const pnl = partialPnl + finalPnl;
+        const exitSettlement = calcSellProceeds(exitPrice, position.quantity, sellFeeRate, sellTaxRate);
+        const pnl = partialPnl + finalPnl - exitSettlement.fee - exitSettlement.tax;
         const pnlPercent = totalQty > 0 && position.entryPrice > 0
           ? (pnl / (position.entryPrice * totalQty)) * 100
           : 0;
@@ -141,7 +175,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
           entryDate: position.entryDate,
           entryPrice: position.entryPrice,
           exitDate: today.date,
-          exitPrice: today.close,
+          exitPrice: roundMoney(exitPrice * 100) / 100,
           quantity: totalQty,
           pnl: Math.round(pnl),
           pnlPercent: Math.round(pnlPercent * 100) / 100,
@@ -160,7 +194,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
           patternMap.set(pName, stat);
         }
 
-        cash += position.quantity * today.close;
+        cash += exitSettlement.net;
         position = null;
       }
     }
@@ -171,14 +205,15 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
 
       if (buyCondition && today.close > 0) {
         const investAmount = Math.min(cash, maxPerTrade);
-        const quantity = Math.floor(investAmount / today.close);
+        const entryPrice = applyBuyExecution(today.close, buySlippageRate);
+        const quantity = Math.floor(investAmount / (entryPrice * (1 + buyFeeRate)));
 
         if (quantity > 0) {
-          const cost = quantity * today.close;
-          cash -= cost;
+          const buyCost = calcBuyCost(entryPrice, quantity, buyFeeRate);
+          cash -= buyCost.total;
           position = {
             entryDate: today.date,
-            entryPrice: today.close,
+            entryPrice: entryPrice,
             quantity,
             highSinceEntry: today.close,
             phase: "initial",
@@ -202,7 +237,9 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     const partialPnl = position.partialExitPrice && position.partialExitQty > 0
       ? (position.partialExitPrice - position.entryPrice) * position.partialExitQty
       : 0;
-    const pnl = partialPnl + (last.close - position.entryPrice) * position.quantity;
+    const exitPrice = applySellExecution(last.close, sellSlippageRate);
+    const exitSettlement = calcSellProceeds(exitPrice, position.quantity, sellFeeRate, sellTaxRate);
+    const pnl = partialPnl + (exitPrice - position.entryPrice) * position.quantity - exitSettlement.fee - exitSettlement.tax;
     const totalQty = position.quantity + position.partialExitQty;
     const pnlPercent = totalQty > 0 && position.entryPrice > 0
       ? (pnl / (position.entryPrice * totalQty)) * 100
@@ -213,7 +250,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
       entryDate: position.entryDate,
       entryPrice: position.entryPrice,
       exitDate: last.date,
-      exitPrice: last.close,
+      exitPrice: roundMoney(exitPrice * 100) / 100,
       quantity: totalQty,
       pnl: Math.round(pnl),
       pnlPercent: Math.round(pnlPercent * 100) / 100,
@@ -231,7 +268,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
       patternMap.set(pName, stat);
     }
 
-    cash += position.quantity * last.close;
+    cash += exitSettlement.net;
   }
 
   // ── 결과 집계 ──
@@ -309,5 +346,6 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
     patternStats,
     equityCurve,
     config: { stopLoss, trailingStop, partialExitRatio, maxHoldDays },
+    realism: { buyFeeRate, sellFeeRate, sellTaxRate, buySlippageRate, sellSlippageRate },
   };
 }

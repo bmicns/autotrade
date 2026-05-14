@@ -9,10 +9,14 @@ import { getEngineLockState } from "@/lib/engine/app-config";
 import { getActiveKisConfig } from "@/lib/kis/runtime-config";
 import { KIS_RUNTIME_MODE } from "@/lib/constants";
 import { resolveKisAccessToken } from "@/lib/kis/runtime-token";
+import { requireSessionWriteRequest } from "@/lib/request-guard";
 
 const MAX_QTY = 10_000;
 
 export async function POST(req: NextRequest) {
+  const guard = requireSessionWriteRequest(req);
+  if (guard) return guard;
+
   try {
     const lockState = await getEngineLockState();
     if (lockState.locked) {

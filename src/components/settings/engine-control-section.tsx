@@ -68,6 +68,9 @@ export function EngineControlSection() {
     enabled
     && healthStatus === "stale"
     && !engineState?.runtime.engineLocked;
+  const hasStaleLock =
+    engineState?.runtime.engineLockStale
+    && !engineState?.runtime.engineLocked;
 
   const formatAgo = (minutes: number | null | undefined) => {
     if (minutes === null || minutes === undefined) return "미확인";
@@ -216,6 +219,24 @@ export function EngineControlSection() {
                 {restartMessage}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {hasStaleLock && (
+        <div style={{ padding: "0 20px 20px" }}>
+          <div style={{
+            padding: "14px 16px",
+            borderRadius: 14,
+            background: "#FEF2F2",
+            border: "1.5px solid #FECACA",
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#B91C1C" }}>
+              stale engine lock 감지
+            </div>
+            <div style={{ fontSize: 11, color: "#991B1B", marginTop: 4, lineHeight: 1.5 }}>
+              마지막 lock {formatAgo(engineState?.runtime.engineLockAgeMinutes)} · 다음 엔진 실행 시 자동 회복 대상입니다.
+            </div>
           </div>
         </div>
       )}

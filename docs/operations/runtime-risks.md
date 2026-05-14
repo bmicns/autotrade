@@ -47,6 +47,15 @@
 - 현재 대응:
   주말, 근로자의 날, 연말 최종 거래일은 코드로 스킵하고, 그 외 공휴일/임시 휴장은 `app_config.market_holidays`로 수동 주입 가능하다.
 
+### 5-1. stale lock / stale order 복구
+
+- 현재 상태:
+  `engine_lock`은 TTL을 넘기면 stale lock으로 간주하고 다음 엔진 실행에서 자동 회복한다.
+- 현재 대응:
+  `pending_orders`는 엔진 시작 시 `30분` 초과 항목을 자동 정리하고 이벤트 로그에 남긴다.
+- 운영 확인:
+  홈/설정에서 stale lock 표시 여부, `engine-log`의 `stale_lock_recovered`, `stale_pending_orders_cleaned`, `pending_order_deleted(stale_cleanup)` 기록을 함께 확인한다.
+
 ### 6. 전략 분리 후 배분값 오설정
 
 - 현재 상태:

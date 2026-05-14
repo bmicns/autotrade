@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
-import { GET as runEngine } from "@/app/api/engine/route";
+import { runEngineRequest } from "@/app/api/engine/route";
 import { apiCacheHeaders } from "@/lib/http-cache";
+import { requireSessionWriteRequest } from "@/lib/request-guard";
 
-export async function POST() {
+export async function POST(req: Request) {
+  const guard = requireSessionWriteRequest(req);
+  if (guard) return guard;
+
   try {
-    const response = await runEngine();
+    const response = await runEngineRequest();
     return response;
   } catch (error) {
     return NextResponse.json(

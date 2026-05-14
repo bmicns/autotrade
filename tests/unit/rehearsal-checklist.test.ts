@@ -33,14 +33,15 @@ test("rehearsal summary reflects manual updates and inferred evidence together",
   const merged = applyRehearsalEvidence(updated, {
     manual_buy: "2026-05-04T00:00:00.000Z",
     manual_sell: "2026-05-04T01:00:00.000Z",
+    auto_entry: "2026-05-04T01:30:00.000Z",
     auto_exit: "2026-05-04T02:00:00.000Z",
     reconcile: "2026-05-04T03:00:00.000Z",
   });
 
   const summary = summarizeRehearsalChecklist(merged);
   assert.deepEqual(summary, {
-    totalCount: 5,
-    completedCount: 5,
+    totalCount: 6,
+    completedCount: 6,
     remainingCount: 0,
     completed: true,
   });

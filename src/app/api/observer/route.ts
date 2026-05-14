@@ -4,6 +4,7 @@ import { KIS_API_BASE, KIS_TR } from "@/lib/constants";
 import { getKstNowParts, getMarketClosureReason } from "@/lib/engine/market-calendar";
 import { runLearning } from "@/lib/learning";
 import { getKisCredentialCandidates, persistKisConfig } from "@/lib/kis/runtime-config";
+import { requireCronBearerAuth } from "@/lib/request-guard";
 
 async function issueKisToken(appKey: string, appSecret: string): Promise<{ ok: true; token: string } | { ok: false; detail: string }> {
   const tokenRes = await fetch(`${KIS_API_BASE}/oauth2/tokenP`, {
@@ -50,7 +51,10 @@ async function resolveObserverKisCredentials(): Promise<
   return { ok: false, detail: `KIS 토큰 발급 실패: ${failures.join(" | ")}` };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const guard = requireCronBearerAuth(req);
+  if (guard) return guard;
+
   const supabaseError = getSupabaseConfigError();
   if (supabaseError) {
     return NextResponse.json({ error: supabaseError }, { status: 503 });

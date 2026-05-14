@@ -4,10 +4,14 @@ import { getMarketClosureReason } from "@/lib/engine/market-calendar";
 import { cancelOpenBuyOrders } from "@/lib/engine/kis";
 import { getBalance, getToken } from "@/lib/kis/api";
 import { sendMarketCloseAlert } from "@/lib/engine/notify";
+import { requireCronBearerAuth } from "@/lib/request-guard";
 import type { EngineConfig } from "@/lib/engine/types";
 type MinConfig = Pick<EngineConfig, "appKey" | "appSecret" | "accountNo" | "token">;
 
-export async function GET() {
+export async function GET(req: Request) {
+  const guard = requireCronBearerAuth(req);
+  if (guard) return guard;
+
   try {
     const { data: appConfigs } = await supabase.from("app_config").select("key, value");
     const cfgMap = new Map((appConfigs || []).map((r: { key: string; value: unknown }) => [r.key, r.value]));

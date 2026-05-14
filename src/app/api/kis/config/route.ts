@@ -10,6 +10,7 @@ import { buildKisConfigUpsertPayload } from "@/lib/kis/config-payload";
 import { normalizeKisAccountInput } from "@/lib/kis/account";
 import { buildKisProductCodeConfigKey, normalizeKisProfileId } from "@/lib/kis/profile";
 import { apiCacheHeaders } from "@/lib/http-cache";
+import { requireSessionWriteRequest } from "@/lib/request-guard";
 
 // GET — KIS 설정 조회
 export async function GET(req: Request) {
@@ -41,6 +42,9 @@ export async function GET(req: Request) {
 
 // POST — KIS 설정 저장
 export async function POST(req: Request) {
+  const guard = requireSessionWriteRequest(req);
+  if (guard) return guard;
+
   const supabaseError = getSupabaseConfigError();
   if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
 
@@ -125,6 +129,9 @@ export async function POST(req: Request) {
 
 // DELETE — DB 저장 KIS 설정 초기화
 export async function DELETE(req: Request) {
+  const guard = requireSessionWriteRequest(req);
+  if (guard) return guard;
+
   const supabaseError = getSupabaseConfigError();
   if (supabaseError) return NextResponse.json({ error: supabaseError }, { status: 503 });
 

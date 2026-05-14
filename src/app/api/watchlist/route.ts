@@ -1,6 +1,7 @@
 import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { NextRequest, NextResponse } from "next/server";
 import { apiCacheHeaders } from "@/lib/http-cache";
+import { requireSessionWriteRequest } from "@/lib/request-guard";
 
 
 // GET: 관심종목 목록 조회
@@ -25,6 +26,9 @@ function validateCode(code: unknown): code is string {
 
 // POST: 관심종목 추가
 export async function POST(req: NextRequest) {
+  const guard = requireSessionWriteRequest(req);
+  if (guard) return guard;
+
   const supabaseError = getSupabaseConfigError();
   if (supabaseError) {
     return NextResponse.json({ error: supabaseError }, { status: 503, headers: apiCacheHeaders.realtime });
@@ -47,6 +51,9 @@ export async function POST(req: NextRequest) {
 
 // DELETE: 관심종목 삭제
 export async function DELETE(req: NextRequest) {
+  const guard = requireSessionWriteRequest(req);
+  if (guard) return guard;
+
   const supabaseError = getSupabaseConfigError();
   if (supabaseError) {
     return NextResponse.json({ error: supabaseError }, { status: 503, headers: apiCacheHeaders.realtime });

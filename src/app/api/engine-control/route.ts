@@ -3,6 +3,7 @@ import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
 import { buildEngineControlUpdates, upsertAppConfigEntries } from "@/lib/engine/app-config";
 import { readEngineControlSnapshot } from "@/lib/engine/control";
 import { apiCacheHeaders } from "@/lib/http-cache";
+import { requireSessionWriteRequest } from "@/lib/request-guard";
 
 export async function GET() {
   const supabaseError = getSupabaseConfigError();
@@ -16,6 +17,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const guard = requireSessionWriteRequest(req);
+  if (guard) return guard;
+
   const supabaseError = getSupabaseConfigError();
   if (supabaseError) {
     return NextResponse.json({ error: supabaseError }, { status: 503, headers: apiCacheHeaders.realtime });

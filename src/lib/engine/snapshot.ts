@@ -5,6 +5,7 @@ import { getKstNowParts } from "@/lib/engine/market-calendar";
 import { compareClosedPositionPnl } from "@/lib/engine/pnl-audit";
 import { summarizeOperationalAlerts } from "@/lib/engine/alert-priority";
 import { KIS_RUNTIME_MODE, NEXIO_ENV } from "@/lib/constants";
+import { resolveEngineLockState } from "@/lib/engine/recovery";
 import { getActiveKisConfig } from "@/lib/kis/runtime-config";
 import { getKisProfileLabel, maskKisAccountNo } from "@/lib/kis/profile";
 import { summarizeManualIntentHealth, summarizeOrderLifecycle, summarizeOrderTimelineRisk } from "@/lib/engine/order-timeline";
@@ -90,9 +91,9 @@ export async function readEngineStateSnapshot(): Promise<EngineStateSnapshot> {
   ]);
 
   const cfgMap = new Map((configRes.data ?? []).map((row: { key: string; value: unknown }) => [row.key, row.value]));
-  const lockValue = cfgMap.get("engine_lock");
-  const engineLockAt = typeof lockValue === "string" && lockValue ? lockValue : null;
-  const engineLocked = !!(engineLockAt && Date.now() - new Date(engineLockAt).getTime() < 5 * 60 * 1000);
+  const lockState = resolveEngineLockState(cfgMap.get("engine_lock"));
+  const engineLockAt = lockState.lockedAt;
+  const engineLocked = lockState.locked;
   const healthStatus = resolveEngineHealth({
     lastRunAt: latestRunRes.data?.run_at ?? null,
     hasError: !!latestRunRes.data?.error,
@@ -221,6 +222,8 @@ export async function readEngineStateSnapshot(): Promise<EngineStateSnapshot> {
       engineEnabled: !(cfgMap.get("engine_enabled") === false || cfgMap.get("engine_enabled") === "false"),
       engineLocked,
       engineLockAt,
+      engineLockStale: lockState.stale,
+      engineLockAgeMinutes: lockState.ageMinutes,
       environment: NEXIO_ENV,
       kisRuntime: {
         mode: KIS_RUNTIME_MODE,
@@ -239,6 +242,11 @@ export async function readEngineStateSnapshot(): Promise<EngineStateSnapshot> {
       recentLifecycleRiskCount: recentOrderTimelineRisk.lifecycleRiskCount,
       recentManualOrderCount: recentOrderTimelineRisk.manualOrderCount,
       recentTimeoutCleanupCount,
+      recentStaleCleanupCount: recentEvents.reduce((count, row) => {
+        if (String(row.event_type) !== "pending_order_deleted") return count;
+        const payload = (row.payload as Record<string, unknown> | null) ?? null;
+        return String(payload?.resolution ?? "") === "stale_cleanup" ? count + 1 : count;
+      }, 0),
       recentOrderFailureCount: recentOrderFailureCountFromEvents,
       todayTradeCount,
       todayRealizedPnl,

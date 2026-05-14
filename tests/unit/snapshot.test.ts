@@ -85,6 +85,8 @@ test("snapshot builder assembles runtime state and summary from rows", () => {
   assert.equal(snapshot.openPositions[0].strategyKey, "watchlist_pullback");
   assert.equal(snapshot.runtime.engineEnabled, true);
   assert.equal(snapshot.runtime.engineLocked, false);
+  assert.equal(snapshot.runtime.engineLockStale, false);
+  assert.equal(snapshot.runtime.engineLockAgeMinutes, null);
 });
 
 test("snapshot scope selector splits active vs history signals", () => {
@@ -115,6 +117,7 @@ test("snapshot builder keeps injected operational summary metrics", () => {
       recentLifecycleRiskCount: 2,
       recentManualOrderCount: 1,
       recentTimeoutCleanupCount: 0,
+      recentStaleCleanupCount: 2,
       recentOrderFailureCount: 0,
       todayTradeCount: 3,
       todayRealizedPnl: -12500,
@@ -126,6 +129,7 @@ test("snapshot builder keeps injected operational summary metrics", () => {
   assert.equal(snapshot.summary.recentLifecycleRiskCount, 2);
   assert.equal(snapshot.summary.recentManualOrderCount, 1);
   assert.equal(snapshot.summary.recentTimeoutCleanupCount, 0);
+  assert.equal(snapshot.summary.recentStaleCleanupCount, 2);
   assert.equal(snapshot.summary.recentOrderFailureCount, 0);
   assert.equal(snapshot.summary.todayTradeCount, 3);
   assert.equal(snapshot.summary.todayRealizedPnl, -12500);

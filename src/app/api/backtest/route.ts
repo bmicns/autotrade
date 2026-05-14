@@ -29,6 +29,11 @@ export async function POST(req: NextRequest) {
       partialExitRatio = control.partial_exit_ratio,
       maxHoldDays = control.max_hold_days,
       maxPerTrade = 1000000,
+      buyFeeRate = 0.00015,
+      sellFeeRate = 0.00015,
+      sellTaxRate = 0.0018,
+      buySlippageRate = 0.0005,
+      sellSlippageRate = 0.0005,
     } = body;
 
     if (!stockCode) {
@@ -63,32 +68,37 @@ export async function POST(req: NextRequest) {
       partialExitRatio,
       maxHoldDays,
       maxPerTrade,
+      buyFeeRate,
+      sellFeeRate,
+      sellTaxRate,
+      buySlippageRate,
+      sellSlippageRate,
     });
 
-    // 실전 성과 비교 — 백테스트와 동일 기간의 positions 데이터
+    // 실전 성과 비교 — 백테스트와 동일 기간의 trade_memory 데이터
     const periodStart = candles[0]?.date ?? "";
     const periodEnd = candles[candles.length - 1]?.date ?? "";
     let liveComparison = null;
     if (periodStart && periodEnd) {
-      const { data: livePositions } = await supabase
-        .from("positions")
-        .select("pnl_amount, pnl_percent, entry_date, exit_date, exit_reason, status")
+      const { data: liveTrades } = await supabase
+        .from("trade_memory")
+        .select("pnl_amount, pnl_percent, entry_date, closed_at, exit_reason, is_win")
         .eq("stock_code", stockCode)
         .gte("entry_date", periodStart)
-        .lte("entry_date", periodEnd);
+        .lte("entry_date", periodEnd)
+        .not("closed_at", "is", null);
 
-      if (livePositions && livePositions.length > 0) {
-        const closed = livePositions.filter((p) => p.status === "closed");
-        const wins = closed.filter((p) => (p.pnl_amount ?? 0) > 0);
-        const totalPnl = closed.reduce((s, p) => s + (Number(p.pnl_amount) || 0), 0);
+      if (liveTrades && liveTrades.length > 0) {
+        const wins = liveTrades.filter((p) => (Number(p.pnl_amount) || 0) > 0);
+        const totalPnl = liveTrades.reduce((s, p) => s + (Number(p.pnl_amount) || 0), 0);
         const avgWinPnl = wins.length > 0 ? wins.reduce((s, p) => s + (Number(p.pnl_amount) || 0), 0) / wins.length : 0;
-        const losses = closed.filter((p) => (p.pnl_amount ?? 0) <= 0);
+        const losses = liveTrades.filter((p) => (Number(p.pnl_amount) || 0) <= 0);
         const avgLossPnl = losses.length > 0 ? Math.abs(losses.reduce((s, p) => s + (Number(p.pnl_amount) || 0), 0) / losses.length) : 0;
         liveComparison = {
           period: `${periodStart} ~ ${periodEnd}`,
-          totalTrades: livePositions.length,
-          closedTrades: closed.length,
-          winRate: closed.length > 0 ? Math.round((wins.length / closed.length) * 1000) / 10 : 0,
+          totalTrades: liveTrades.length,
+          closedTrades: liveTrades.length,
+          winRate: liveTrades.length > 0 ? Math.round((wins.length / liveTrades.length) * 1000) / 10 : 0,
           profitFactor: avgLossPnl > 0 ? Math.round((avgWinPnl / avgLossPnl) * 100) / 100 : null,
           totalPnl: Math.round(totalPnl),
           totalReturn: maxPerTrade > 0 ? Math.round((totalPnl / maxPerTrade) * 10000) / 100 : 0,
