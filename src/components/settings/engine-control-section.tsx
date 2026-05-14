@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { COLORS } from "@/lib/constants";
+import { useEngineState } from "@/hooks/useEngineState";
 import {
   setEngineEnabled,
   setMaxPositions as saveMaxPositionsAction,
@@ -34,10 +35,13 @@ const saveButtonStyle: React.CSSProperties = {
 };
 
 export function EngineControlSection() {
+  const { state: engineState, fetchEngineState } = useEngineState();
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [confirm, setConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartMessage, setRestartMessage] = useState<string | null>(null);
   const [maxPositions, setMaxPositions] = useState(5);
   const [posInput, setPosInput] = useState("5");
   const [posSaved, setPosSaved] = useState(false);
@@ -46,6 +50,7 @@ export function EngineControlSection() {
   const [secSaved, setSecSaved] = useState(false);
 
   useEffect(() => {
+    fetchEngineState();
     fetch("/api/engine-control")
       .then((r) => r.json())
       .then((d) => {
@@ -56,7 +61,42 @@ export function EngineControlSection() {
         setSecInput(String(d.max_per_sector ?? 2));
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [fetchEngineState]);
+
+  const healthStatus = engineState?.runtime.healthStatus.status ?? "unknown";
+  const canRestartStaleEngine =
+    enabled
+    && healthStatus === "stale"
+    && !engineState?.runtime.engineLocked;
+
+  const formatAgo = (minutes: number | null | undefined) => {
+    if (minutes === null || minutes === undefined) return "미확인";
+    if (minutes < 60) return `${minutes}분 전`;
+    return `${Math.floor(minutes / 60)}시간 ${minutes % 60}분 전`;
+  };
+
+  const restartEngine = async () => {
+    setRestarting(true);
+    setRestartMessage(null);
+    try {
+      const res = await fetch("/api/engine-restart", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRestartMessage(data.error ?? "엔진 재가동 실패");
+        return;
+      }
+      if (data.skipped) {
+        setRestartMessage(data.reason ? `재가동 보류 · ${data.reason}` : "재가동 보류");
+      } else {
+        setRestartMessage("재가동 요청 완료");
+      }
+      await fetchEngineState();
+    } catch {
+      setRestartMessage("엔진 재가동 네트워크 오류");
+    } finally {
+      setRestarting(false);
+    }
+  };
 
   const saveMaxPerSector = async () => {
     const val = Number(secInput);
@@ -101,7 +141,7 @@ export function EngineControlSection() {
 
   return (
     <>
-      <div style={{ padding: "20px 20px 10px" }}>
+      <div id="engine-control-section" style={{ padding: "20px 20px 10px", scrollMarginTop: 16 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" as const }}>엔진 제어</span>
       </div>
 
@@ -136,6 +176,49 @@ export function EngineControlSection() {
           </button>
         </div>
       </div>
+
+      {canRestartStaleEngine && (
+        <div style={{ padding: "0 20px 20px" }}>
+          <div style={{
+            padding: "14px 16px",
+            borderRadius: 14,
+            background: "#FFF7ED",
+            border: "1.5px solid #FED7AA",
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#C2410C" }}>
+              엔진 지연 감지 · 마지막 실행 {formatAgo(engineState?.runtime.healthStatus.minutesSinceLastRun)}
+            </div>
+            <div style={{ fontSize: 11, color: "#9A3412", marginTop: 4, lineHeight: 1.5 }}>
+              장중 실행 기록이 오래되어 수동 재가동이 필요합니다.
+            </div>
+            <button
+              type="button"
+              disabled={restarting || saving}
+              onClick={restartEngine}
+              style={{
+                marginTop: 12,
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: "none",
+                background: "#C2410C",
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: restarting || saving ? "not-allowed" : "pointer",
+                opacity: restarting || saving ? 0.6 : 1,
+                fontFamily: "inherit",
+              }}
+            >
+              {restarting ? "재가동 중..." : "엔진 재가동"}
+            </button>
+            {restartMessage && (
+              <div style={{ fontSize: 11, color: restartMessage.includes("완료") ? "#15803D" : "#9A3412", marginTop: 8 }}>
+                {restartMessage}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 최대 포지션 수 */}
       <div style={{ padding: "16px 20px 20px" }}>

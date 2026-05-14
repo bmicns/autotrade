@@ -30,3 +30,4 @@ server/data/
 dist/
 _archive/
 .tmp-tests/
+*.tsbuildinfo
