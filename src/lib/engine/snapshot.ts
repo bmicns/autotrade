@@ -1,6 +1,6 @@
 import { supabase } from "@/lib/supabase/api-client";
 import type { PendingOrder } from "@/lib/engine/db";
-import { resolveEngineHealth } from "@/lib/engine/control";
+import { readEngineControlSnapshot, resolveEngineHealth } from "@/lib/engine/control";
 import { getKstNowParts } from "@/lib/engine/market-calendar";
 import { compareClosedPositionPnl } from "@/lib/engine/pnl-audit";
 import { summarizeOperationalAlerts } from "@/lib/engine/alert-priority";
@@ -53,7 +53,7 @@ export async function readEngineStateSnapshot(): Promise<EngineStateSnapshot> {
     supabase
       .from("app_config")
       .select("key, value")
-      .in("key", ["engine_enabled", "engine_lock"]),
+      .in("key", ["engine_enabled", "engine_lock", "operator_display_name"]),
     supabase
       .from("engine_runs")
       .select("run_at, error")
@@ -93,6 +93,7 @@ export async function readEngineStateSnapshot(): Promise<EngineStateSnapshot> {
   ]);
 
   const cfgMap = new Map((configRes.data ?? []).map((row: { key: string; value: unknown }) => [row.key, row.value]));
+  const controlSnapshot = readEngineControlSnapshot(cfgMap);
   const lockState = resolveEngineLockState(cfgMap.get("engine_lock"));
   const engineLockAt = lockState.lockedAt;
   const engineLocked = lockState.locked;
@@ -221,7 +222,8 @@ export async function readEngineStateSnapshot(): Promise<EngineStateSnapshot> {
     signals: (signalsRes.data ?? []) as Array<Record<string, unknown>>,
     events: (eventsRes.data ?? []) as Array<Record<string, unknown>>,
     runtime: {
-      engineEnabled: !(cfgMap.get("engine_enabled") === false || cfgMap.get("engine_enabled") === "false"),
+      engineEnabled: controlSnapshot.engine_enabled,
+      operatorDisplayName: controlSnapshot.operator_display_name,
       engineLocked,
       engineLockAt,
       engineLockStale: lockState.stale,

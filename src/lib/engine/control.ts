@@ -21,6 +21,7 @@ export interface EngineHealthSnapshot {
 
 export interface EngineControlSnapshot {
   engine_enabled: boolean;
+  operator_display_name: string;
   max_positions: number;
   max_per_sector: number;
   stop_loss: number;
@@ -62,6 +63,13 @@ function readNumber(cfgMap: Map<string, unknown>, key: string, fallback: number)
   return cfgMap.has(key) ? Number(cfgMap.get(key)) : fallback;
 }
 
+function readString(cfgMap: Map<string, unknown>, key: string, fallback: string): string {
+  const raw = cfgMap.get(key);
+  if (typeof raw !== "string") return fallback;
+  const trimmed = raw.trim();
+  return trimmed || fallback;
+}
+
 function readStringList(cfgMap: Map<string, unknown>, key: string, fallback: string[]): string[] {
   const raw = cfgMap.get(key);
   if (!raw) return fallback;
@@ -76,6 +84,11 @@ export function readEngineControlSnapshot(cfgMap: Map<string, unknown>): EngineC
   const marketWindows = resolveEffectiveMarketWindows(cfgMap);
   return {
     engine_enabled: !(cfgMap.get("engine_enabled") === false || cfgMap.get("engine_enabled") === "false"),
+    operator_display_name: readString(
+      cfgMap,
+      "operator_display_name",
+      process.env.NEXT_PUBLIC_OPERATOR_NAME?.trim() || process.env.ADMIN_ID?.trim() || "운영자",
+    ),
     max_positions: readNumber(cfgMap, "max_positions", 5) || 5,
     max_per_sector: readNumber(cfgMap, "max_per_sector", 2) || 2,
     stop_loss: readNumber(cfgMap, "stop_loss", Math.abs(DEFAULT_ENGINE_CONFIG.stopLoss)),

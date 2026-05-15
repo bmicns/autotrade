@@ -22,6 +22,7 @@ test("readEngineControlSnapshot normalizes defaults and allocations", () => {
 
   const snapshot = readEngineControlSnapshot(cfgMap);
   assert.equal(snapshot.engine_enabled, false);
+  assert.equal(snapshot.operator_display_name.length > 0, true);
   assert.equal(snapshot.max_positions, 5);
   assert.equal(snapshot.stop_loss, 2);
   assert.equal(snapshot.trailing_stop, 3);

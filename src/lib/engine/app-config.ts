@@ -12,6 +12,7 @@ export interface AppConfigChangeEntry {
 
 export interface EngineControlInput {
   enabled?: boolean;
+  operatorDisplayName?: string;
   maxPositions?: number;
   maxPerSector?: number;
   stopLoss?: number;
@@ -83,6 +84,17 @@ function asTime(value: unknown, label: string): string {
   return parsed;
 }
 
+function asShortText(value: unknown, maxLength: number, label: string): string {
+  const parsed = String(value ?? "").trim();
+  if (!parsed) {
+    throw new Error(`${label}는 비어 있을 수 없습니다`);
+  }
+  if (parsed.length > maxLength) {
+    throw new Error(`${label}는 ${maxLength}자 이하여야 합니다`);
+  }
+  return parsed;
+}
+
 function parseHolidayValues(raw: string[] | string): string[] {
   const values = Array.isArray(raw)
     ? raw.map((value) => String(value).trim()).filter(Boolean)
@@ -124,6 +136,7 @@ export function buildEngineControlUpdates(input: Partial<EngineControlInput>, up
     if (typeof input.enabled !== "boolean") throw new Error("enabled는 boolean이어야 합니다");
     updates.push({ key: "engine_enabled", value: input.enabled, updated_at: updatedAt });
   }
+  if ("operatorDisplayName" in input) updates.push({ key: "operator_display_name", value: asShortText(input.operatorDisplayName, 24, "operatorDisplayName"), updated_at: updatedAt });
   if ("maxPositions" in input) updates.push({ key: "max_positions", value: asIntegerInRange(input.maxPositions, 1, 20, "maxPositions"), updated_at: updatedAt });
   if ("maxPerSector" in input) updates.push({ key: "max_per_sector", value: asIntegerInRange(input.maxPerSector, 1, 10, "maxPerSector"), updated_at: updatedAt });
   if ("stopLoss" in input) updates.push({ key: "stop_loss", value: asNumberInRange(input.stopLoss, 0.1, 30, "stopLoss"), updated_at: updatedAt });

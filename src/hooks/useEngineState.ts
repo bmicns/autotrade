@@ -21,6 +21,7 @@ export interface EngineStateResponse {
   recentEvents: { id: string; eventType: string; stockCode: string | null; entityTable: string; payload: Record<string, unknown> | null; createdAt: string }[];
   runtime: {
     engineEnabled: boolean;
+    operatorDisplayName: string | null;
     engineLocked: boolean;
     engineLockAt: string | null;
     engineLockStale: boolean;

@@ -6,6 +6,7 @@ import { buildEngineControlUpdates } from "../../src/lib/engine/app-config";
 test("buildEngineControlUpdates normalizes multi-field payloads", () => {
   const updates = buildEngineControlUpdates({
     enabled: false,
+    operatorDisplayName: "김동의",
     maxPositions: 7,
     stopLoss: 4,
     trailingStop: 2.5,
@@ -23,6 +24,7 @@ test("buildEngineControlUpdates normalizes multi-field payloads", () => {
 
   assert.deepEqual(updates, [
     { key: "engine_enabled", value: false, updated_at: "2026-05-04T00:00:00.000Z" },
+    { key: "operator_display_name", value: "김동의", updated_at: "2026-05-04T00:00:00.000Z" },
     { key: "max_positions", value: 7, updated_at: "2026-05-04T00:00:00.000Z" },
     { key: "stop_loss", value: 4, updated_at: "2026-05-04T00:00:00.000Z" },
     { key: "trailing_stop", value: 2.5, updated_at: "2026-05-04T00:00:00.000Z" },
@@ -40,6 +42,7 @@ test("buildEngineControlUpdates normalizes multi-field payloads", () => {
 });
 
 test("buildEngineControlUpdates rejects invalid payloads", () => {
+  assert.throws(() => buildEngineControlUpdates({ operatorDisplayName: "" }), /비어 있을 수 없습니다/);
   assert.throws(() => buildEngineControlUpdates({ maxPositions: 0 }), /1~20 정수/);
   assert.throws(() => buildEngineControlUpdates({ morningStart: "9:30" }), /HH:MM 형식/);
   assert.throws(() => buildEngineControlUpdates({ marketHolidays: ["2026/05/05"] }), /YYYY-MM-DD/);

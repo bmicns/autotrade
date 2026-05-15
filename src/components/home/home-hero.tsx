@@ -16,6 +16,7 @@ interface HomeHeroProps {
   marketCtx: MarketContext | null;
   cashBalance: number;
   holdingCount: number;
+  displayName: string | null;
 }
 
 function getTimeGreeting(date: Date): string {
@@ -47,10 +48,11 @@ export function HomeHero(props: HomeHeroProps) {
     marketCtx,
     cashBalance,
     holdingCount,
+    displayName,
   } = props;
   const greeting = getTimeGreeting(new Date());
   const greetingCaption = getGreetingCaption(new Date());
-  const displayName = "대장님";
+  const resolvedDisplayName = (displayName ?? process.env.NEXT_PUBLIC_OPERATOR_NAME ?? "운영자").trim() || "운영자";
 
   return (
     <>
@@ -67,15 +69,15 @@ export function HomeHero(props: HomeHeroProps) {
         )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
           <div style={{ minWidth: 220 }}>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 999, background: "rgba(15,23,42,0.22)", border: "1px solid rgba(255,255,255,0.12)" }}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 999, background: "rgba(15,23,42,0.22)", border: "1px solid rgba(255,255,255,0.12)", marginLeft: 0 }}>
               <span style={{ fontSize: 10, fontWeight: 800, color: "rgba(255,255,255,0.62)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
                 Nexio Operator Deck
               </span>
             </div>
             <div style={{ marginTop: 12, fontSize: 23, fontWeight: 800, color: "#fff", letterSpacing: "-0.04em" }}>
-              {`${displayName}, ${greeting}`}
+              {`${resolvedDisplayName}님, ${greeting}`}
             </div>
-            <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,0.68)", lineHeight: 1.6 }}>
+            <div style={{ marginTop: 5, fontSize: 12, color: "rgba(255,255,255,0.68)", lineHeight: 1.6 }}>
               {greetingCaption}
             </div>
           </div>

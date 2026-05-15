@@ -42,6 +42,8 @@ export function EngineControlSection() {
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [restartMessage, setRestartMessage] = useState<string | null>(null);
+  const [operatorDisplayName, setOperatorDisplayName] = useState("");
+  const [operatorSaved, setOperatorSaved] = useState(false);
   const [maxPositions, setMaxPositions] = useState(5);
   const [posInput, setPosInput] = useState("5");
   const [posSaved, setPosSaved] = useState(false);
@@ -55,6 +57,7 @@ export function EngineControlSection() {
       .then((r) => r.json())
       .then((d) => {
         setEnabled(d.engine_enabled ?? true);
+        setOperatorDisplayName(d.operator_display_name ?? "");
         setMaxPositions(d.max_positions ?? 5);
         setPosInput(String(d.max_positions ?? 5));
         setMaxPerSector(d.max_per_sector ?? 2);
@@ -110,6 +113,26 @@ export function EngineControlSection() {
       setMaxPerSector(val);
       setSecSaved(true);
       setTimeout(() => setSecSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveOperatorDisplayName = async () => {
+    const value = operatorDisplayName.trim();
+    if (!value) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/engine-control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operatorDisplayName: value }),
+      });
+      if (!res.ok) return;
+      setOperatorDisplayName(value);
+      setOperatorSaved(true);
+      setTimeout(() => setOperatorSaved(false), 2000);
+      await fetchEngineState();
     } finally {
       setSaving(false);
     }
@@ -240,6 +263,34 @@ export function EngineControlSection() {
           </div>
         </div>
       )}
+
+      <div style={{ padding: "0 20px 20px" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 8 }}>운영자 이름</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            type="text"
+            value={operatorDisplayName}
+            onChange={(e) => setOperatorDisplayName(e.target.value.slice(0, 24))}
+            placeholder="홈 인사말에 표시할 이름"
+            style={{ ...controlInputStyle, textAlign: "left" }}
+          />
+          <button
+            disabled={saving || !operatorDisplayName.trim()}
+            onClick={saveOperatorDisplayName}
+            style={{
+              ...saveButtonStyle,
+              background: operatorSaved ? "#22C55E" : COLORS.ink,
+              color: "#fff",
+              opacity: (saving || !operatorDisplayName.trim()) ? 0.5 : 1,
+            }}
+          >
+            {operatorSaved ? "✓" : "저장"}
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: COLORS.dim, marginTop: 6 }}>
+          홈 상단 인사말에 사용하는 표시명입니다.
+        </div>
+      </div>
 
       {/* 최대 포지션 수 */}
       <div style={{ padding: "16px 20px 20px" }}>

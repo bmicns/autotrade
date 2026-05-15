@@ -396,6 +396,7 @@ export function HomeTab({ marketMode = "kr" }: Props) {
         marketCtx={marketCtx}
         cashBalance={cashBalance}
         holdingCount={isUsView ? (overseasSummary?.summary?.positionCount ?? 0) : holdings.length}
+        displayName={engineState?.runtime.operatorDisplayName ?? null}
       />
 
       <EngineHealthCard actionSlot={<PreflightStatusCard />} />

@@ -23,6 +23,7 @@ export interface EngineStateSnapshot {
   }>;
   runtime: {
     engineEnabled: boolean;
+    operatorDisplayName: string | null;
     engineLocked: boolean;
     engineLockAt: string | null;
     engineLockStale: boolean;
@@ -94,6 +95,7 @@ export function buildEngineStateSnapshotFromRows(params: {
     recentEvents,
     runtime: params.runtime ?? {
       engineEnabled: true,
+      operatorDisplayName: null,
       engineLocked: false,
       engineLockAt: null,
       engineLockStale: false,
