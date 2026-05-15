@@ -48,6 +48,22 @@ async function parseResponseDetail(res: Response): Promise<{ detail: string; kis
   return { detail, kisCode };
 }
 
+function parseKisPayloadError(data: unknown): { detail: string; kisCode?: string } | null {
+  if (!data || typeof data !== "object") return null;
+  const payload = data as {
+    rt_cd?: string;
+    msg1?: string;
+    msg_cd?: string;
+    error_description?: string;
+    error_code?: string;
+  };
+  if (String(payload.rt_cd ?? "0") === "0") return null;
+  return {
+    detail: payload.error_description || payload.msg1 || `KIS business error (${String(payload.rt_cd ?? "unknown")})`,
+    kisCode: payload.error_code || payload.msg_cd || payload.rt_cd,
+  };
+}
+
 // 토큰 발급
 export async function getTokenDetails(appKey: string, appSecret: string): Promise<KISTokenDetails> {
   const res = await fetch(`${KIS_API_BASE}/oauth2/tokenP`, {
@@ -113,7 +129,12 @@ export async function getPrice(config: KISConfig, stockCode: string) {
       `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`,
       { headers: headers(config, KIS_TR.PRICE) }
     );
-    if (res.ok) return res.json();
+    if (res.ok) {
+      const data = await res.json();
+      const payloadError = parseKisPayloadError(data);
+      if (!payloadError) return data;
+      throw new KISError("KIS price business error", 400, payloadError.detail, payloadError.kisCode);
+    }
 
     const { detail } = await parseResponseDetail(res);
     if (attempt === 0 && shouldRetryKisRequest(detail, res.status)) {
@@ -147,7 +168,12 @@ export async function getBalance(config: KISConfig) {
       `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`,
       { headers: headers(config, KIS_TR.BALANCE) }
     );
-    if (res.ok) return res.json();
+    if (res.ok) {
+      const data = await res.json();
+      const payloadError = parseKisPayloadError(data);
+      if (!payloadError) return data;
+      throw new KISError("KIS balance business error", 400, payloadError.detail, payloadError.kisCode);
+    }
 
     const { detail, kisCode } = await parseResponseDetail(res);
     if (attempt === 0 && shouldRetryKisRequest(detail, res.status)) {
@@ -235,7 +261,12 @@ export async function getOrderHistory(config: KISConfig) {
       `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-daily-ccld?${params}`,
       { headers: headers(config, KIS_TR.ORDER_HISTORY) }
     );
-    if (res.ok) return res.json();
+    if (res.ok) {
+      const data = await res.json();
+      const payloadError = parseKisPayloadError(data);
+      if (!payloadError) return data;
+      throw new KISError("KIS history business error", 400, payloadError.detail, payloadError.kisCode);
+    }
 
     const { detail } = await parseResponseDetail(res);
     if (attempt === 0 && shouldRetryKisRequest(detail, res.status)) {
