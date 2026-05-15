@@ -9,6 +9,7 @@ import { EngineHealthCard } from "./engine-health-card";
 import { PreflightStatusCard } from "./preflight-status-card";
 import { EngineStateCard } from "./engine-state-card";
 import { OperatorSummaryStrip } from "./operator-summary-strip";
+import { HomeAlertStrip } from "./home-alert-strip";
 import { HomeHero } from "./home-hero";
 import { HoldingsSection } from "./holdings-section";
 import { NewsSection } from "./news-section";
@@ -393,6 +394,8 @@ export function HomeTab({ marketMode = "kr" }: Props) {
         isUsView={isUsView}
         overseasSummary={overseasSummary}
         marketCtx={marketCtx}
+        cashBalance={cashBalance}
+        holdingCount={isUsView ? (overseasSummary?.summary?.positionCount ?? 0) : holdings.length}
       />
 
       <EngineHealthCard actionSlot={<PreflightStatusCard />} />
@@ -421,6 +424,17 @@ export function HomeTab({ marketMode = "kr" }: Props) {
         aiSentiment={aiSentiment}
       />
 
+      {engineState && (
+        <HomeAlertStrip
+          runtime={engineState.runtime}
+          kisConnected={kisConnected}
+          holdingRiskCount={combinedHoldingRiskAlerts.length}
+          marketMode={marketMode}
+        />
+      )}
+
+      {engineState && <OperatorSummaryStrip state={engineState.runtime} summaryCards={summaryCards} />}
+
       <OpsInsightsSection
         isUsView={isUsView}
         overseasSummary={overseasSummary}
@@ -440,9 +454,6 @@ export function HomeTab({ marketMode = "kr" }: Props) {
       />
 
       <EngineStateCard collapsible defaultOpen={false} />
-
-      {engineState && <OperatorSummaryStrip state={engineState.runtime} summaryCards={summaryCards} />}
-
       <div style={{ height: 1, background: COLORS.line, marginTop: 10 }} />
     </div>
   );

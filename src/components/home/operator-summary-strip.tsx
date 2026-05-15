@@ -26,7 +26,7 @@ export function OperatorSummaryStrip({ state, summaryCards }: OperatorSummaryStr
     : { bg: COLORS.sub, border: COLORS.line, text: COLORS.ink, value: "대기 중" };
 
   return (
-    <div style={{ margin: "10px 20px 0", padding: 14, borderRadius: 16, background: "linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)", border: `1px solid ${COLORS.line}` }}>
+    <div style={{ margin: "12px 20px 0", padding: 14, borderRadius: 16, background: "linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)", border: `1px solid ${COLORS.line}`, boxShadow: "0 10px 24px rgba(15,23,42,0.06)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 10, fontWeight: 800, color: COLORS.dim, letterSpacing: "0.08em", textTransform: "uppercase" }}>Operator Summary</div>
@@ -60,9 +60,9 @@ export function OperatorSummaryStrip({ state, summaryCards }: OperatorSummaryStr
         </div>
       </div>
 
-      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
         {summaryCards.map((item) => (
-          <div key={item.label} style={{ padding: "12px 14px", borderRadius: 12, background: "#FFF", border: `1px solid ${COLORS.line}` }}>
+          <div key={item.label} style={{ padding: "12px 14px", borderRadius: 12, background: "#FFF", border: `1px solid ${COLORS.line}`, minWidth: 0 }}>
             <div style={{ fontSize: 10, color: COLORS.dim, letterSpacing: "0.05em", textTransform: "uppercase" }}>{item.label}</div>
             <div style={{ marginTop: 6, fontSize: 16, fontWeight: 700, color: item.tone, fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
           </div>

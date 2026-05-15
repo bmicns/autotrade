@@ -92,10 +92,11 @@ export function WatchlistSection() {
             </div>
           </div>
         ) : (
-          watchlist.map((w) => {
+          watchlist.map((w, index) => {
             const isDart = dartCodes.has(w.code);
+            const rowKey = w.id ? `${w.code}-${w.id}` : `${w.code}-${index}`;
             return (
-              <div key={w.id} style={{
+              <div key={rowKey} style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center",
                 background: isDart ? COLORS.fallL : COLORS.card,
                 borderRadius: 10, padding: "12px 16px", marginBottom: 8,
