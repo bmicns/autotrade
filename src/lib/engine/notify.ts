@@ -1,6 +1,7 @@
 import type { KISApiErrorContext } from "@/lib/engine/types";
 import { supabase } from "@/lib/supabase/api-client";
 import { shouldSendAlert } from "@/lib/engine/alert-dedupe";
+import { getStrategyLabel } from "@/lib/nexio-display";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -35,12 +36,6 @@ export interface TradeAlertParams {
   regime?: string;
 }
 
-const STRATEGY_LABELS: Record<string, string> = {
-  watchlist_pullback: "관심종목",
-  surge_momentum: "급등모멘텀",
-  institutional_follow: "기관추종",
-};
-
 const REGIME_LABELS: Record<string, string> = {
   trending: "추세장",
   ranging: "횡보장",
@@ -66,7 +61,7 @@ export async function sendTradeAlert(params: TradeAlertParams): Promise<void> {
   if (score !== undefined) lines.push(`점수: ${score}점`);
   if (pnlPct !== undefined) lines.push(`손익: ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`);
   const tags: string[] = [];
-  if (strategyKey) tags.push(STRATEGY_LABELS[strategyKey] ?? strategyKey);
+  if (strategyKey) tags.push(getStrategyLabel(strategyKey));
   if (regime) tags.push(REGIME_LABELS[regime] ?? regime);
   if (tags.length > 0) lines.push(`태그: ${tags.join(" · ")}`);
 

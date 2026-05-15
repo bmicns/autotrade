@@ -16,6 +16,7 @@ import { getKisProfileLabel, maskKisAccountNo } from "@/lib/kis/profile";
 import { summarizeManualIntentHealth, summarizeOrderLifecycle, summarizeOrderTimelineRisk } from "@/lib/engine/order-timeline";
 import { applyRehearsalEvidence, normalizeRehearsalChecklist, summarizeRehearsalChecklist, type RehearsalEvidenceMap } from "@/lib/operations/rehearsal-checklist";
 import { getSupabaseConfigError, supabase } from "@/lib/supabase/api-client";
+import { resolveActiveBrokerState } from "@/lib/broker/config";
 
 type CheckStatus = "pass" | "warn" | "fail";
 type CheckImpact = "advisory" | "ops_blocker" | "trading_blocker";
@@ -646,7 +647,10 @@ export async function GET() {
     ];
     const sortedChecks = sortChecks(checks);
     const readiness = summarizeReadiness(sortedChecks);
+    const brokerState = await resolveActiveBrokerState();
     const runtimeContext = {
+      brokerId: brokerState.brokerId,
+      brokerLabel: brokerState.brokerLabel,
       environment: NEXIO_ENV,
       runtimeMode: KIS_RUNTIME_MODE,
       activeProfileId: activeConfig?.profileId ?? null,

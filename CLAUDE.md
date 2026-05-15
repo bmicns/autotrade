@@ -1,5 +1,10 @@
 @AGENTS.md
 
+## Development Rules
+
+세션 시작 시 `DEVELOPMENT_RULES.md`를 먼저 읽고, 이후 `NEXT_SESSION.md`와 작업 관련 위키/문서를 확인합니다.
+개발, 검증, 배포는 `DEVELOPMENT_RULES.md`의 절대규칙을 우선합니다.
+
 ## Knowledge Base (Wiki)
 
 컴파일된 지식 위키가 `wiki/` 폴더에 있습니다.

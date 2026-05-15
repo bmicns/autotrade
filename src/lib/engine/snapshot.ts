@@ -8,6 +8,7 @@ import { KIS_RUNTIME_MODE, NEXIO_ENV } from "@/lib/constants";
 import { resolveEngineLockState } from "@/lib/engine/recovery";
 import { getActiveKisConfig } from "@/lib/kis/runtime-config";
 import { getKisProfileLabel, maskKisAccountNo } from "@/lib/kis/profile";
+import { resolveActiveBrokerState } from "@/lib/broker/config";
 import { summarizeManualIntentHealth, summarizeOrderLifecycle, summarizeOrderTimelineRisk } from "@/lib/engine/order-timeline";
 import {
   buildEngineStateSnapshotFromRows,
@@ -27,7 +28,7 @@ const ORDER_FAILURE_ACTION_TYPES = new Set([
 export async function readEngineStateSnapshot(): Promise<EngineStateSnapshot> {
   const todayKst = getKstNowParts().date;
   const pnlAuditCutoff = new Date(Date.now() - 14 * 86400000).toISOString();
-  const [positionsRes, ordersRes, signalsRes, eventsRes, configRes, latestRunRes, recentRunsRes, closedPositionsRes, closedMemoriesRes, todayRunsRes, todayClosedRes, activeKisConfig] = await Promise.all([
+  const [positionsRes, ordersRes, signalsRes, eventsRes, configRes, latestRunRes, recentRunsRes, closedPositionsRes, closedMemoriesRes, todayRunsRes, todayClosedRes, activeKisConfig, brokerState] = await Promise.all([
     supabase
       .from("positions")
       .select("id, stock_code, stock_name, phase, status, entry_price, entry_qty, entry_date, entry_signal")
@@ -88,6 +89,7 @@ export async function readEngineStateSnapshot(): Promise<EngineStateSnapshot> {
       .eq("status", "closed")
       .gte("exit_date", todayKst),
     getActiveKisConfig(),
+    resolveActiveBrokerState(),
   ]);
 
   const cfgMap = new Map((configRes.data ?? []).map((row: { key: string; value: unknown }) => [row.key, row.value]));
@@ -226,6 +228,8 @@ export async function readEngineStateSnapshot(): Promise<EngineStateSnapshot> {
       engineLockAgeMinutes: lockState.ageMinutes,
       environment: NEXIO_ENV,
       kisRuntime: {
+        brokerId: brokerState.brokerId,
+        brokerLabel: brokerState.brokerLabel,
         mode: KIS_RUNTIME_MODE,
         profileId: activeKisConfig?.profileId ?? null,
         profileLabel: activeKisConfig ? getKisProfileLabel(activeKisConfig.profileId) : null,

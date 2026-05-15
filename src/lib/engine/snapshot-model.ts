@@ -29,6 +29,8 @@ export interface EngineStateSnapshot {
     engineLockAgeMinutes: number | null;
     environment: "dev" | "paper" | "prod";
     kisRuntime: {
+      brokerId: string | null;
+      brokerLabel: string | null;
       mode: string;
       profileId: string | null;
       profileLabel: string | null;
@@ -98,6 +100,8 @@ export function buildEngineStateSnapshotFromRows(params: {
       engineLockAgeMinutes: null,
       environment: "dev",
       kisRuntime: {
+        brokerId: null,
+        brokerLabel: null,
         mode: "paper",
         profileId: null,
         profileLabel: null,

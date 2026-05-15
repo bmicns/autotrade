@@ -114,10 +114,11 @@
 대장님이 `이어서 하자`만 말씀하시면 아래 순서로 진행하면 된다.
 
 1. `git status --short`로 현재 워크트리 확인
-2. `docs/operations/pre-live-checklist.md` 먼저 열어서 남은 항목 확인
-3. `./node_modules/.bin/tsc --noEmit --noUnusedLocals --noUnusedParameters`
-4. `npm run test:unit`
-5. 대장님이 별도 지정이 없으면 아래 우선순위대로 진행
+2. `DEVELOPMENT_RULES.md` 먼저 열어서 절대규칙 확인
+3. `docs/operations/pre-live-checklist.md` 먼저 열어서 남은 항목 확인
+4. `./node_modules/.bin/tsc --noEmit --noUnusedLocals --noUnusedParameters`
+5. `npm run test:unit`
+6. 대장님이 별도 지정이 없으면 아래 우선순위대로 진행
 
 기본 다음 작업 우선순위:
 

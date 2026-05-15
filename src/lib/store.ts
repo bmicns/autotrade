@@ -1,8 +1,10 @@
 import { create } from "zustand";
-import { fetchBalance, fetchPrices } from "./kis/client";
+import { fetchBrokerBalance, fetchBrokerPrices } from "@/lib/broker/client";
 import { loadFromStorage, removeFromStorage, saveToStorage } from "@/lib/browser-storage";
 import { startKisHealthPolling, stopKisHealthPolling } from "@/lib/kis/health-poller";
 import type { EngineControlSnapshot } from "@/lib/engine/control";
+import type { BrokerId } from "@/lib/broker/types";
+import { DEFAULT_BROKER_ID } from "@/lib/broker/registry";
 
 type Tab = "home" | "signal" | "portfolio" | "stats" | "strategy" | "settings";
 type MarketScope = "kr" | "us";
@@ -43,6 +45,7 @@ export interface Trade {
 }
 
 export interface KISConfig {
+  brokerId?: BrokerId;
   appKey: string;
   appSecret: string;
   accountNo: string;
@@ -229,7 +232,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ tradeSettings: s });
   },
 
-  kisConfig: { appKey: "", appSecret: "", accountNo: "", accountProductCode: "01" },
+  kisConfig: { brokerId: DEFAULT_BROKER_ID, appKey: "", appSecret: "", accountNo: "", accountProductCode: "01" },
   setKISConfig: (c) => {
     saveToStorage("nx-kis", c);
     set({ kisConfig: c });
@@ -307,7 +310,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     try {
       // 1. 잔고 조회
-      let balance = await fetchBalance(config);
+      let balance = await fetchBrokerBalance({ brokerId: config.brokerId, config });
 
       // 잔고 실패 시 토큰 재발급 후 1회 재시도
       if (!balance && config.token) {
@@ -321,7 +324,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           if (data.token) {
             config = { ...config, token: data.token, tokenExpiry: new Date(Date.now() + 86400000).toISOString() };
             setKISConfig(config);
-            balance = await fetchBalance(config);
+            balance = await fetchBrokerBalance({ brokerId: config.brokerId, config });
           }
         } catch { /* 재시도 실패 → 아래에서 처리 */ }
       }
@@ -383,7 +386,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // 보유 종목이 있으면 시세도 조회
         if (holdings.length > 0) {
           const codes = holdings.map((h) => h.code);
-          const priceMap = await fetchPrices(config, codes);
+          const priceMap = await fetchBrokerPrices({ brokerId: config.brokerId, config }, codes);
           set({ prices: priceMap });
 
           // 캔들 데이터 일괄 조회 (batch endpoint)
@@ -427,13 +430,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     clearCachedHoldings();
 
     // KIS 설정: Supabase 우선, 없으면 localStorage 폴백
-    let kisConfig = loadFromStorage<KISConfig>("nx-kis", { appKey: "", appSecret: "", accountNo: "", accountProductCode: "01" });
+    let kisConfig = loadFromStorage<KISConfig>("nx-kis", { brokerId: DEFAULT_BROKER_ID, appKey: "", appSecret: "", accountNo: "", accountProductCode: "01" });
     try {
       const res = await fetch("/api/kis/config");
       if (res.ok) {
         const remote = await res.json();
         if (remote.appKey) {
-          kisConfig = { accountProductCode: "01", ...remote };
+          kisConfig = { brokerId: DEFAULT_BROKER_ID, accountProductCode: "01", ...remote };
           saveToStorage("nx-kis", kisConfig);
         }
       }

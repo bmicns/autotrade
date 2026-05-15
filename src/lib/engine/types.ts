@@ -132,6 +132,8 @@ export interface KISHealthStatus {
   connected: boolean;
   lastChecked: string;      // ISO 8601 (KST)
   latencyMs: number;
+  brokerId?: string;
+  brokerLabel?: string;
   errorCode?: string;       // KIS API error_code (예: "EGW00123")
   errorMessage?: string;    // KIS API error_description
 }

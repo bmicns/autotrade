@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 
-interface EngineStatePosition {
+export interface EngineStatePosition {
   id: string;
   stockCode: string;
   stockName: string | null;
@@ -14,7 +14,7 @@ interface EngineStatePosition {
   strategyKey: string | null;
 }
 
-interface EngineStateResponse {
+export interface EngineStateResponse {
   openPositions: EngineStatePosition[];
   pendingOrders: { id: string; stock_code: string; stock_name: string | null; order_qty: number; limit_price: number; strategy_key: string | null }[];
   pendingSignals: { id: string; stockCode: string; stockName: string | null; status: string; score: number | null; strategyKey: string | null; createdAt: string }[];
@@ -27,6 +27,8 @@ interface EngineStateResponse {
     engineLockAgeMinutes: number | null;
     environment: "dev" | "paper" | "prod";
     kisRuntime: {
+      brokerId: string | null;
+      brokerLabel: string | null;
       mode: string;
       profileId: string | null;
       profileLabel: string | null;

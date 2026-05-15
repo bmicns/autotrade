@@ -5,6 +5,7 @@ import { COLORS } from "@/lib/constants";
 import { ActionLinkChip } from "@/components/common/action-link-chip";
 import { resolvePreflightCheckAction, summarizePreflightAction } from "@/lib/navigation/nexio-actions";
 import { navigateToSection } from "@/lib/navigation/section-nav";
+import { formatRuntimeContextLine } from "@/lib/nexio-display";
 
 type CheckStatus = "pass" | "warn" | "fail";
 
@@ -26,6 +27,8 @@ type PreflightResponse = {
     advisoryWarnCount: number;
   };
   runtimeContext?: {
+    brokerId?: string | null;
+    brokerLabel?: string | null;
     environment: "dev" | "paper" | "prod";
     runtimeMode: string;
     activeProfileLabel: string | null;
@@ -152,10 +155,14 @@ export function PreflightStatusCard() {
                   </div>
                   {preflight.runtimeContext && (
                     <div style={{ marginTop: 6, fontSize: 11, color: COLORS.mid, lineHeight: 1.5 }}>
-                      {String(preflight.runtimeContext.environment).toUpperCase()} · {preflight.runtimeContext.runtimeMode === "paper" ? "모의투자" : preflight.runtimeContext.runtimeMode}
-                      {preflight.runtimeContext.activeProfileLabel ? ` · ${preflight.runtimeContext.activeProfileLabel}` : ""}
-                      {preflight.runtimeContext.activeAccountMask ? ` · ${preflight.runtimeContext.activeAccountMask}` : ""}
-                      {preflight.runtimeContext.activeSource ? ` · ${preflight.runtimeContext.activeSource}` : ""}
+                      {formatRuntimeContextLine({
+                        brokerLabel: preflight.runtimeContext.brokerLabel,
+                        environment: preflight.runtimeContext.environment,
+                        runtimeMode: preflight.runtimeContext.runtimeMode,
+                        profileLabel: preflight.runtimeContext.activeProfileLabel,
+                        accountMask: preflight.runtimeContext.activeAccountMask,
+                        source: preflight.runtimeContext.activeSource,
+                      })}
                     </div>
                   )}
                 </div>

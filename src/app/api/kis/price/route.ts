@@ -1,24 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPrice } from "@/lib/kis/api";
+import { resolveActiveBrokerState } from "@/lib/broker/config";
+import { fetchBrokerPrice, validateBrokerPricePayload } from "@/lib/broker/market";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as {
-      code?: string;
-      appKey?: string;
-      appSecret?: string;
-      token?: string;
-      accountNo?: string;
-      accountProductCode?: string;
-    };
-    const { code, appKey, appSecret, token, accountNo = "", accountProductCode = "01" } = body;
-
-    if (!code || !appKey || !appSecret || !token) {
-      return NextResponse.json({ error: "code, appKey, appSecret, token 필수" }, { status: 400 });
+    const brokerState = await resolveActiveBrokerState();
+    const validated = validateBrokerPricePayload(await req.json() as Record<string, unknown>);
+    if ("error" in validated) {
+      return NextResponse.json({ error: validated.error }, { status: 400 });
     }
-
-    const data = await getPrice({ appKey, appSecret, accountNo, accountProductCode, token }, code);
-    return NextResponse.json(data);
+    const result = await fetchBrokerPrice(brokerState.brokerId, validated);
+    return NextResponse.json(result.body, { status: result.status });
   } catch (e: unknown) {
     console.error("[price] 시세 조회 오류:", e);
     return NextResponse.json({ error: "시세 조회 실패" }, { status: 500 });

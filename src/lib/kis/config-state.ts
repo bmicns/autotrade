@@ -1,8 +1,12 @@
 import { KIS_API_BASE, KIS_RUNTIME_MODE, NEXIO_ENV } from "../constants";
 import type { KISConfigSource, RuntimeKisConfig } from "./runtime-config";
 import { getKisProfileLabel, maskKisAccountNo } from "./profile";
+import { DEFAULT_BROKER_ID, getBrokerLabel } from "../broker/registry";
+import type { BrokerId } from "../broker/types";
 
 export interface KISConfigState {
+  brokerId: BrokerId;
+  brokerLabel: string;
   profileId: string;
   profileLabel: string;
   appKey: string;
@@ -24,6 +28,8 @@ export function buildKisConfigState(params: {
   dbConfig: RuntimeKisConfig | null;
 }): KISConfigState {
   return {
+    brokerId: DEFAULT_BROKER_ID,
+    brokerLabel: getBrokerLabel(DEFAULT_BROKER_ID),
     profileId: params.active?.profileId ?? "default",
     profileLabel: getKisProfileLabel(params.active?.profileId ?? "default"),
     appKey: params.active?.config.appKey ?? "",

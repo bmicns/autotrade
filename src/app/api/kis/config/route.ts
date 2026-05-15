@@ -11,6 +11,7 @@ import { normalizeKisAccountInput } from "@/lib/kis/account";
 import { buildKisProductCodeConfigKey, normalizeKisProfileId } from "@/lib/kis/profile";
 import { apiCacheHeaders } from "@/lib/http-cache";
 import { requireSessionWriteRequest } from "@/lib/request-guard";
+import { persistActiveBrokerId, resolveActiveBrokerState } from "@/lib/broker/config";
 
 // GET — KIS 설정 조회
 export async function GET(req: Request) {
@@ -28,11 +29,13 @@ export async function GET(req: Request) {
     .select("token, token_expiry")
     .eq("id", profileId)
     .maybeSingle();
+  const brokerState = await resolveActiveBrokerState();
 
   const state = buildKisConfigState({ active, envConfig, dbConfig });
   return NextResponse.json(
     {
       ...state,
+      ...brokerState,
       token: data?.token ?? "",
       tokenExpiry: data?.token_expiry ?? "",
     },
@@ -50,7 +53,7 @@ export async function POST(req: Request) {
 
   const body = await req.json();
   const profileId = normalizeKisProfileId(typeof body?.profileId === "string" ? body.profileId : undefined);
-  const { appKey, appSecret, accountNo, accountProductCode, token, tokenExpiry } = body;
+  const { appKey, appSecret, accountNo, accountProductCode, token, tokenExpiry, brokerId } = body;
   const normalizedAccount = normalizeKisAccountInput(
     typeof accountNo === "string" ? accountNo : "",
     typeof accountProductCode === "string" ? accountProductCode : "01",
@@ -117,6 +120,7 @@ export async function POST(req: Request) {
         })
       : Promise.resolve({ error: null }),
   ]);
+  const normalizedBrokerId = await persistActiveBrokerId(typeof brokerId === "string" ? brokerId : undefined);
 
   if (configError || productCodeError) {
     return NextResponse.json(
@@ -124,7 +128,7 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   }
-  return NextResponse.json({ success: true, profileId });
+  return NextResponse.json({ success: true, profileId, brokerId: normalizedBrokerId });
 }
 
 // DELETE — DB 저장 KIS 설정 초기화

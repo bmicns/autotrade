@@ -6,6 +6,7 @@ import { useEngineState } from "@/hooks/useEngineState";
 import { ActionLinkChip } from "@/components/common/action-link-chip";
 import { resolveAlertAction, resolveSummaryAction } from "@/lib/navigation/nexio-actions";
 import { navigateToSection } from "@/lib/navigation/section-nav";
+import { formatRuntimeContextLine } from "@/lib/nexio-display";
 
 function fmtKst(iso: string) {
   return new Date(iso).toLocaleString("ko-KR", {
@@ -182,12 +183,15 @@ export function EngineStateCard({ collapsible = false, defaultOpen = true }: Eng
       <div style={{ padding: "10px 12px", borderRadius: 10, background: "#F8FAFC", border: `1px solid ${COLORS.line}`, marginBottom: 12 }}>
         <div style={{ fontSize: 10, color: COLORS.dim }}>실행 환경</div>
         <div style={{ marginTop: 4, fontSize: 14, fontWeight: 800, color: COLORS.ink }}>
-          {String(state.runtime.environment).toUpperCase()} · {state.runtime.kisRuntime.mode === "paper" ? "모의투자" : state.runtime.kisRuntime.mode}
-        </div>
-        <div style={{ marginTop: 6, fontSize: 11, color: COLORS.mid, lineHeight: 1.5 }}>
-          {state.runtime.kisRuntime.profileLabel ?? "미설정"} 프로필
-          {state.runtime.kisRuntime.accountMask ? ` · ${state.runtime.kisRuntime.accountMask}` : ""}
-          {state.runtime.kisRuntime.source ? ` · ${state.runtime.kisRuntime.source}` : ""}
+          {formatRuntimeContextLine({
+            brokerLabel: state.runtime.kisRuntime.brokerLabel,
+            environment: state.runtime.environment,
+            runtimeMode: state.runtime.kisRuntime.mode,
+            profileLabel: state.runtime.kisRuntime.profileLabel,
+            profileId: state.runtime.kisRuntime.profileId,
+            accountMask: state.runtime.kisRuntime.accountMask,
+            source: state.runtime.kisRuntime.source,
+          })}
         </div>
       </div>
 
