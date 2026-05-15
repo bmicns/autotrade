@@ -1,5 +1,7 @@
 import { getBalance, getPrice, KISError } from "@/lib/kis/api";
 import { sendKISApiErrorAlert } from "@/lib/engine/notify";
+import { getActiveKisConfig } from "@/lib/kis/runtime-config";
+import { resolveKisAccessToken } from "@/lib/kis/runtime-token";
 import type { BrokerId } from "./types";
 import { getBrokerLabel } from "./registry";
 
@@ -11,8 +13,8 @@ export function validateBrokerPricePayload(input: Record<string, unknown>) {
   const accountNo = typeof input.accountNo === "string" ? input.accountNo : "";
   const accountProductCode = typeof input.accountProductCode === "string" ? input.accountProductCode : "01";
 
-  if (!code || !appKey || !appSecret || !token) {
-    return { error: "code, appKey, appSecret, token 필수" };
+  if (!code) {
+    return { error: "code 필수" };
   }
 
   return { code, appKey, appSecret, token, accountNo, accountProductCode };
@@ -30,13 +32,29 @@ export async function fetchBrokerPrice(
     };
   }
 
+  const active = await getActiveKisConfig();
+  const fallbackConfig = active?.config ?? null;
+  const appKey = payload.appKey || fallbackConfig?.appKey || "";
+  const appSecret = payload.appSecret || fallbackConfig?.appSecret || "";
+  const accountNo = payload.accountNo || fallbackConfig?.accountNo || "";
+  const accountProductCode = payload.accountProductCode || fallbackConfig?.accountProductCode || "01";
+  if (!appKey || !appSecret) {
+    return {
+      ok: false as const,
+      status: 400,
+      body: { error: "활성 KIS 앱키/시크릿이 없습니다" },
+    };
+  }
+  const profileId = active?.profileId ?? "default";
+  const token = payload.token || await resolveKisAccessToken(profileId, appKey, appSecret);
+
   const data = await getPrice(
     {
-      appKey: payload.appKey,
-      appSecret: payload.appSecret,
-      accountNo: payload.accountNo,
-      accountProductCode: payload.accountProductCode,
-      token: payload.token,
+      appKey,
+      appSecret,
+      accountNo,
+      accountProductCode,
+      token,
     },
     payload.code,
   );
@@ -55,10 +73,6 @@ export function validateBrokerBalancePayload(input: Record<string, unknown>) {
   const accountNo = typeof input.accountNo === "string" ? input.accountNo : "";
   const accountProductCode = typeof input.accountProductCode === "string" ? input.accountProductCode : "01";
 
-  if (!appKey || !appSecret || !token || !accountNo) {
-    return { error: "appKey, appSecret, token, accountNo 필수" };
-  }
-
   return { appKey, appSecret, token, accountNo, accountProductCode };
 }
 
@@ -76,12 +90,27 @@ export async function fetchBrokerBalance(
 
   const timestamp = new Date().toISOString();
   try {
+    const active = await getActiveKisConfig();
+    const fallbackConfig = active?.config ?? null;
+    const appKey = payload.appKey || fallbackConfig?.appKey || "";
+    const appSecret = payload.appSecret || fallbackConfig?.appSecret || "";
+    const accountNo = payload.accountNo || fallbackConfig?.accountNo || "";
+    const accountProductCode = payload.accountProductCode || fallbackConfig?.accountProductCode || "01";
+    if (!appKey || !appSecret || !accountNo) {
+      return {
+        ok: false as const,
+        status: 400,
+        body: { error: "활성 KIS 잔고 조회 설정이 없습니다" },
+      };
+    }
+    const profileId = active?.profileId ?? "default";
+    const token = payload.token || await resolveKisAccessToken(profileId, appKey, appSecret);
     const data = await getBalance({
-      appKey: payload.appKey,
-      appSecret: payload.appSecret,
-      accountNo: payload.accountNo,
-      accountProductCode: payload.accountProductCode,
-      token: payload.token,
+      appKey,
+      appSecret,
+      accountNo,
+      accountProductCode,
+      token,
     });
     return {
       ok: true as const,
