@@ -4,12 +4,9 @@ import { recordEngineEvent } from "@/lib/engine/event-log";
 import { getPrice as getEnginePrice, sellOrder } from "@/lib/engine/kis";
 import { sendTradeAlert } from "@/lib/engine/notify";
 import { getOpenPositionRemainingQty } from "@/lib/engine/position-math";
-import type { EngineConfig } from "@/lib/engine/types";
 import { getEngineLockState } from "@/lib/engine/app-config";
-import { getActiveKisConfig } from "@/lib/kis/runtime-config";
-import { KIS_RUNTIME_MODE } from "@/lib/constants";
-import { resolveKisAccessToken } from "@/lib/kis/runtime-token";
 import { requireSessionWriteRequest } from "@/lib/request-guard";
+import { resolveActiveDomesticExecutionContext } from "@/lib/broker/execution";
 
 const MAX_QTY = 10_000;
 
@@ -43,41 +40,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `수동 매도 테스트는 현재 전량 매도만 지원합니다. 보유 ${openQty}주` }, { status: 400 });
     }
 
-    const domesticProfileId = KIS_RUNTIME_MODE === "prod" ? "kr" : "default";
-    const active = await getActiveKisConfig(domesticProfileId);
-    if (!active) {
-      return NextResponse.json(
-        { error: `${KIS_RUNTIME_MODE === "prod" ? "국내" : "모의"} KIS 설정이 없습니다` },
-        { status: 400 },
-      );
+    const execution = await resolveActiveDomesticExecutionContext();
+    if (!execution.ok) {
+      return NextResponse.json({ error: execution.error }, { status: execution.status });
     }
-
-    // Write-order rehearsal should validate the same credential set with a fresh token.
-    let token: string;
-    try {
-      token = await resolveKisAccessToken(active.profileId, active.config.appKey, active.config.appSecret);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "국내 KIS 토큰 발급 실패";
-      return NextResponse.json(
-        { error: `국내 KIS 토큰 오류 (${active.source}/${active.profileId}): ${message}` },
-        { status: 500 },
-      );
-    }
-    const engineConfig: EngineConfig = {
-      appKey: active.config.appKey,
-      appSecret: active.config.appSecret,
-      accountNo: active.config.accountNo,
-      accountProductCode: active.config.accountProductCode,
-      token,
-      stopLoss: -2,
-      trailingStop: -3,
-      maxPerTrade: 0,
-      maxDailyTrades: 1,
-      partialExitRatio: 50,
-      dailyLossLimit: -3,
-      maxHoldDays: 1,
-      dynamicRisk: true,
-    };
+    const engineConfig = execution.engineConfig;
     const quote = await getEnginePrice(engineConfig, stockCode!);
     const currentPrice = Number(quote?.stck_prpr) || Number(position?.entry_price) || 0;
 
@@ -95,7 +62,7 @@ export async function POST(req: NextRequest) {
         side: "sell",
         market: "kr",
         currency: "KRW",
-        profileId: active.profileId,
+        profileId: execution.profileId,
         order_no: result.ordNo ?? null,
         stock_name: String(position?.stock_name ?? stockCode),
         reason: result.msg ?? "매도 주문 실패",
@@ -127,7 +94,7 @@ export async function POST(req: NextRequest) {
         side: "sell",
         market: "kr",
         currency: "KRW",
-        profileId: active.profileId,
+        profileId: execution.profileId,
         order_no: result.ordNo ?? null,
         stock_name: String(position?.stock_name ?? stockCode),
         pnlPct: pnlPct ?? null,
