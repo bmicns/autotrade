@@ -19,6 +19,7 @@ import { canReenterPosition, type PendingSignalStatus } from "@/lib/engine/lifec
 import { resolveConfiguredPerStockEntryLimit, resolveSurgeRiskConfig } from "@/lib/engine/surge-strategy";
 import { buildHoldingNewsAlert, fetchNewsSnapshot } from "@/lib/news";
 import { buildOrderFailureAction, recordOrderFailureEvent } from "@/lib/engine/order-failure";
+import { clampLossCutThreshold } from "@/lib/engine/risk-threshold";
 export { batchFetch, getOpeningBonus };
 
 function resolveSellFirstThresholds(params: {
@@ -281,7 +282,8 @@ export async function runStep1(ctx: StepContext): Promise<{
       }
     }
 
-    const effectiveRisk = checkRisk(avgPrice, currentPrice, highPrice, holdStopLoss, holdTrailingStop);
+    const effectiveStopLoss = clampLossCutThreshold(holdStopLoss);
+    const effectiveRisk = checkRisk(avgPrice, currentPrice, highPrice, effectiveStopLoss, holdTrailingStop);
 
     const maxHoldDays = ctx.config.maxHoldDays ?? 5;
     if (pos && effectiveRisk.action === "hold") {

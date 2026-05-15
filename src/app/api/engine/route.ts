@@ -246,6 +246,7 @@ export async function GET(req: Request) {
 
 // KOSPI 등락률 기준 추세장 판정 임계값 (일평균 변동률 고려: 0.5%면 확실한 상승 모멘텀)
 const KOSPI_TRENDING_THRESHOLD = 0.5;
+const AVAILABLE_CASH_BUDGET_RATIO = 0.7;
 
 // ─── 일일 리포트 + 포트폴리오 스냅샷 저장 ───────────
 async function runEndOfDay(
@@ -358,7 +359,11 @@ async function runEngine(
     const balanceSummary = (balanceData?.output2 ?? [])[0] ?? {};
     const totalCapital = Number(balanceSummary.tot_evlu_amt) || 0;
     const availableCash = resolveAvailableCash(balanceSummary);
-    const capitalBase = totalCapital > 0 ? totalCapital : (config.maxPerTrade ?? 1_000_000);
+    const capitalBase = availableCash > 0
+      ? Math.floor(availableCash * AVAILABLE_CASH_BUDGET_RATIO)
+      : totalCapital > 0
+        ? totalCapital
+        : (config.maxPerTrade ?? 1_000_000);
 
     const staleApprovedCutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
     const staleProcessingCutoff = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
@@ -450,7 +455,7 @@ async function runEngine(
     ).pendingOrderStaleCount;
     const ctx: StepContext = {
       config, applied,
-      maxPerTrade:    config.maxPerTrade    ?? 1000000,
+      maxPerTrade:    capitalBase,
       totalCapital:   capitalBase,
       availableCash,
       maxDailyTrades: config.maxDailyTrades ?? 5,

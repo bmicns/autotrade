@@ -92,11 +92,22 @@ function makeEngineLogRequest() {
   return makeRouteRequest("http://localhost/api/engine-log?limit=5&page=1");
 }
 
-function makeRouteRequest(url) {
-  return {
-    url,
-    nextUrl: new URL(url),
-  };
+function makeRouteRequest(url, options = {}) {
+  const headers = new Headers(options.headers ?? {});
+  const request = new Request(url, {
+    method: options.method ?? "GET",
+    headers,
+  });
+  request.nextUrl = new URL(url);
+  return request;
+}
+
+function makeCronRouteRequest(url) {
+  const headers = {};
+  if (process.env.CRON_SECRET) {
+    headers.authorization = `Bearer ${process.env.CRON_SECRET}`;
+  }
+  return makeRouteRequest(url, { headers });
 }
 
 async function main() {
@@ -119,7 +130,7 @@ async function main() {
   console.log(`Route timeout ${timeoutMs}ms`);
 
   const checks = [
-    ["engine", () => invoke("api/engine", "GET")],
+    ["engine", () => invoke("api/engine", "GET", makeCronRouteRequest("http://localhost/api/engine"))],
     ["preflight", () => invoke("api/preflight", "GET")],
     ["engine-log", () => invoke("api/engine-log", "GET", makeEngineLogRequest())],
     ["pending-signals", () => invoke("api/pending-signals", "GET", makeRouteRequest("http://localhost/api/pending-signals?scope=active"))],
