@@ -50,6 +50,19 @@ export function EngineControlSection() {
   const [maxPerSector, setMaxPerSector] = useState(2);
   const [secInput, setSecInput] = useState("2");
   const [secSaved, setSecSaved] = useState(false);
+  const [riskSummary, setRiskSummary] = useState({
+    stopLoss: 5,
+    trailingStop: 3,
+    partialExitRatio: 50,
+    maxTradesPerDay: 5,
+    dailyLossLimit: 3,
+    maxHoldDays: 5,
+    marketCrashThreshold: -2,
+    morningStart: "09:30",
+    morningEnd: "11:30",
+    afternoonStart: "13:00",
+    afternoonEnd: "14:50",
+  });
 
   useEffect(() => {
     fetchEngineState();
@@ -62,6 +75,19 @@ export function EngineControlSection() {
         setPosInput(String(d.max_positions ?? 5));
         setMaxPerSector(d.max_per_sector ?? 2);
         setSecInput(String(d.max_per_sector ?? 2));
+        setRiskSummary({
+          stopLoss: d.stop_loss ?? 5,
+          trailingStop: d.trailing_stop ?? 3,
+          partialExitRatio: d.partial_exit_ratio ?? 50,
+          maxTradesPerDay: d.max_trades_per_day ?? 5,
+          dailyLossLimit: d.daily_loss_limit ?? 3,
+          maxHoldDays: d.max_hold_days ?? 5,
+          marketCrashThreshold: d.market_crash_threshold ?? -2,
+          morningStart: d.morning_start ?? "09:30",
+          morningEnd: d.morning_end ?? "11:30",
+          afternoonStart: d.afternoon_start ?? "13:00",
+          afternoonEnd: d.afternoon_end ?? "14:50",
+        });
       })
       .finally(() => setLoading(false));
   }, [fetchEngineState]);
@@ -263,6 +289,37 @@ export function EngineControlSection() {
           </div>
         </div>
       )}
+
+      <div style={{ padding: "0 20px 20px" }}>
+        <div style={{
+          borderRadius: 14,
+          padding: "14px 16px",
+          background: COLORS.sub,
+          border: `1.5px solid ${COLORS.line}`,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.mid }}>실행 가드</div>
+          <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+            {[
+              { label: "손절", value: `-${riskSummary.stopLoss}%` },
+              { label: "트레일링", value: `고점 -${riskSummary.trailingStop}%` },
+              { label: "1차 부분청산", value: `${riskSummary.partialExitRatio}%` },
+              { label: "일일 손실 한도", value: `-${riskSummary.dailyLossLimit}%` },
+              { label: "장 급락 차단", value: `${riskSummary.marketCrashThreshold}%` },
+              { label: "당일 최대 진입", value: `${riskSummary.maxTradesPerDay}회` },
+              { label: "최대 보유 기간", value: `${riskSummary.maxHoldDays}일` },
+              { label: "세션 시간", value: `${riskSummary.morningStart}-${riskSummary.morningEnd} / ${riskSummary.afternoonStart}-${riskSummary.afternoonEnd}` },
+            ].map((item) => (
+              <div key={item.label} style={{ borderRadius: 10, padding: "10px 12px", background: COLORS.bg, border: `1px solid ${COLORS.line}` }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.dim }}>{item.label}</div>
+                <div style={{ marginTop: 4, fontSize: 13, fontWeight: 800, color: COLORS.ink, lineHeight: 1.4 }}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: COLORS.dim, marginTop: 8, lineHeight: 1.5 }}>
+            현재 엔진이 실제로 참조하는 제한값입니다. 수정은 전략 탭에서 하고, 이 화면에서는 운영 전 최종 확인용으로 봅니다.
+          </div>
+        </div>
+      </div>
 
       <div style={{ padding: "0 20px 20px" }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 8 }}>운영자 이름</div>

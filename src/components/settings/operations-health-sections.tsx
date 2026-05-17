@@ -10,8 +10,10 @@ interface PreflightCheck {
   label: string;
   status: "pass" | "warn" | "fail";
   detail: string;
+  impact?: "advisory" | "ops_blocker" | "trading_blocker";
   blocksTrading?: boolean;
   metadata?: {
+    criteria?: Array<{ label: string; value: string }>;
     missingInDbCount?: number;
     qtyAdjustmentCount?: number;
     orphanedClosureCount?: number;
@@ -70,6 +72,7 @@ interface RehearsalState {
 interface ActionItem {
   tone: "block" | "warn";
   label: string;
+  path?: string;
   detail?: string;
   location?: string;
   anchor?: string;
@@ -93,7 +96,7 @@ interface OperationsHealthSectionsProps {
   rehearsalResult: string | null;
   rehearsal: RehearsalState | null;
   onLoadPreflight: () => void;
-  onJumpToSection: (anchor: string) => void;
+  onJumpToSection: (path: string, anchor?: string) => void;
   onLoadReconcilePreview: () => void;
   onRunReconcile: () => void;
   onLoadPnlAuditPreview: () => void;
@@ -127,6 +130,20 @@ export function OperationsHealthSections({
   onToggleRehearsalItem,
   summarizeBrokerReconcilePlan,
 }: OperationsHealthSectionsProps) {
+  const tradingBlockers = (preflight?.checks ?? []).filter((check) => check.impact === "trading_blocker");
+  const opsBlockers = (preflight?.checks ?? []).filter((check) => check.impact === "ops_blocker");
+  const advisoryChecks = (preflight?.checks ?? []).filter((check) => check.impact === "advisory" && check.status === "warn");
+
+  const impactMeta = (check: PreflightCheck) => {
+    if (check.impact === "trading_blocker") {
+      return { label: "거래 차단", color: "#991B1B", background: "#FEE2E2" };
+    }
+    if (check.impact === "ops_blocker") {
+      return { label: "운영 차단", color: "#9A3412", background: "#FED7AA" };
+    }
+    return { label: "주의", color: "#92400E", background: "#FEF3C7" };
+  };
+
   return (
     <>
       <div id="preflight-section" style={{ padding: "20px 20px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", scrollMarginTop: 16 }}>
@@ -167,6 +184,45 @@ export function OperationsHealthSections({
             </div>
           )}
           {preflight?.readiness && <div style={{ marginTop: 8, fontSize: 11, color: COLORS.mid }}>차단 항목 {preflight.readiness.blockingCount}건 · 운영 경고 {preflight.readiness.advisoryWarnCount}건</div>}
+          {preflight && (
+            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+              <div style={{ borderRadius: 10, padding: "10px 12px", background: "#FEF2F2", border: "1px solid #FECACA" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.dim }}>거래 차단</div>
+                <div style={{ marginTop: 4, fontSize: 14, fontWeight: 800, color: "#B91C1C" }}>
+                  {tradingBlockers.filter((check) => check.status !== "pass").length}건
+                </div>
+              </div>
+              <div style={{ borderRadius: 10, padding: "10px 12px", background: "#FFF7ED", border: "1px solid #FED7AA" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.dim }}>운영 차단</div>
+                <div style={{ marginTop: 4, fontSize: 14, fontWeight: 800, color: "#C2410C" }}>
+                  {opsBlockers.filter((check) => check.status !== "pass").length}건
+                </div>
+              </div>
+              <div style={{ borderRadius: 10, padding: "10px 12px", background: "#FFFBEB", border: "1px solid #FDE68A" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.dim }}>주의</div>
+                <div style={{ marginTop: 4, fontSize: 14, fontWeight: 800, color: "#A16207" }}>
+                  {advisoryChecks.length}건
+                </div>
+              </div>
+            </div>
+          )}
+          {preflight && (tradingBlockers.some((check) => check.status !== "pass") || opsBlockers.some((check) => check.status !== "pass")) && (
+            <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "#F8FAFC", border: `1px solid ${COLORS.line}` }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.dim }}>즉시 확인할 차단 사유</div>
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                {tradingBlockers.filter((check) => check.status !== "pass").slice(0, 3).map((check) => (
+                  <div key={`block-${check.key}`} style={{ fontSize: 11, color: COLORS.ink, lineHeight: 1.5 }}>
+                    <span style={{ fontWeight: 800, color: "#B91C1C" }}>[거래 차단]</span> {check.label} · {check.detail}
+                  </div>
+                ))}
+                {opsBlockers.filter((check) => check.status !== "pass").slice(0, 3).map((check) => (
+                  <div key={`ops-${check.key}`} style={{ fontSize: 11, color: COLORS.ink, lineHeight: 1.5 }}>
+                    <span style={{ fontWeight: 800, color: "#C2410C" }}>[운영 차단]</span> {check.label} · {check.detail}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {actionItems.length > 0 && (
             <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "#FFF7ED", border: "1px solid #FED7AA" }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#C2410C" }}>지금 할 일</div>
@@ -181,7 +237,13 @@ export function OperationsHealthSections({
                       <div style={{ marginTop: 2, fontSize: 11, color: COLORS.mid }}>{item.detail}</div>
                       <div style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 10, color: COLORS.dim }}>{item.location}</span>
-                        {item.anchor && <ActionLinkChip label="여기로 이동" onClick={() => item.anchor && onJumpToSection(item.anchor)} tone="warn" />}
+                        {(item.path || item.anchor) && (
+                          <ActionLinkChip
+                            label={item.buttonLabel ?? "여기로 이동"}
+                            onClick={() => onJumpToSection(item.path ?? "/settings", item.anchor)}
+                            tone="warn"
+                          />
+                        )}
                       </div>
                     </div>
                   </div>
@@ -198,11 +260,34 @@ export function OperationsHealthSections({
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.ink }}>{check.label}</div>
+                        <span style={{ fontSize: 9, fontWeight: 800, color: impactMeta(check).color, background: impactMeta(check).background, borderRadius: 999, padding: "2px 6px" }}>
+                          {impactMeta(check).label}
+                        </span>
                         {check.blocksTrading && <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: "#DC2626", borderRadius: 999, padding: "2px 6px" }}>차단</span>}
                         {!check.blocksTrading && check.status === "warn" && <span style={{ fontSize: 9, fontWeight: 800, color: "#92400E", background: "#FEF3C7", borderRadius: 999, padding: "2px 6px" }}>운영 경고</span>}
                         {check.status === "pass" && <span style={{ fontSize: 9, fontWeight: 800, color: "#166534", background: "#DCFCE7", borderRadius: 999, padding: "2px 6px" }}>통과</span>}
                       </div>
                       <div style={{ fontSize: 11, color: COLORS.mid, marginTop: 2 }}>{check.detail}</div>
+                      {(check.metadata?.criteria?.length ?? 0) > 0 && (
+                        <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {check.metadata?.criteria?.map((item) => (
+                            <span
+                              key={`${check.key}-${item.label}`}
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                color: COLORS.mid,
+                                background: "#F8FAFC",
+                                border: `1px solid ${COLORS.line}`,
+                                borderRadius: 999,
+                                padding: "2px 8px",
+                              }}
+                            >
+                              {item.label} {item.value}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {summarizeBrokerReconcilePlan(check).length > 0 && (
                         <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {summarizeBrokerReconcilePlan(check).map((item) => (
@@ -214,7 +299,12 @@ export function OperationsHealthSections({
                       )}
                       <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 10, color: COLORS.dim }}>{action.location}</span>
-                        {action.anchor && <ActionLinkChip label={action.buttonLabel ?? "이동"} onClick={() => action.anchor && onJumpToSection(action.anchor)} />}
+                        {(action.path || action.anchor) && (
+                          <ActionLinkChip
+                            label={action.buttonLabel ?? "이동"}
+                            onClick={() => onJumpToSection(action.path ?? "/settings", action.anchor)}
+                          />
+                        )}
                       </div>
                     </div>
                     <span style={{ fontSize: 10, fontWeight: 700, color: check.status === "fail" ? "#DC2626" : check.status === "warn" ? "#D97706" : "#15803D", whiteSpace: "nowrap" }}>

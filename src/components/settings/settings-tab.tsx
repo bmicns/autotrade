@@ -7,7 +7,7 @@ import { EngineControlSection } from "@/components/settings/engine-control-secti
 import { BrokerSettingsSection } from "@/components/settings/broker-settings-section";
 import { OperationsHealthSections } from "@/components/settings/operations-health-sections";
 import { summarizePreflightAction } from "@/lib/navigation/nexio-actions";
-import { highlightSectionFromHash, scrollToSection } from "@/lib/navigation/section-nav";
+import { highlightSectionFromHash, navigateToSection, scrollToSection } from "@/lib/navigation/section-nav";
 import { useBrokerSettingsState } from "@/components/settings/use-broker-settings-state";
 
 export function SettingsTab() {
@@ -122,8 +122,18 @@ export function SettingsTab() {
     return items.filter((item) => item.count > 0);
   }, []);
 
-  const jumpToSection = useCallback((anchor: string) => {
-    scrollToSection(anchor);
+  const jumpToSection = useCallback((path: string, anchor?: string) => {
+    if (path && path !== "/settings") {
+      if (anchor) {
+        navigateToSection(path, anchor);
+        return;
+      }
+      window.location.assign(path);
+      return;
+    }
+    if (anchor) {
+      scrollToSection(anchor);
+    }
   }, []);
 
   const loadReconcilePreview = async () => {

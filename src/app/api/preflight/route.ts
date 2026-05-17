@@ -28,7 +28,12 @@ type PreflightCheck = {
   detail: string;
   impact: CheckImpact;
   blocksTrading: boolean;
-  metadata?: Record<string, unknown>;
+  metadata?: {
+    criteria?: Array<{ label: string; value: string }>;
+    missingInDbCount?: number;
+    qtyAdjustmentCount?: number;
+    orphanedClosureCount?: number;
+  };
 };
 
 type EngineStateEventRow = {
@@ -405,6 +410,12 @@ export async function GET() {
             : `실현손실 ${todayRealizedPnlAmount.toLocaleString("ko-KR")}원 (${todayRealizedLossPct.toFixed(2)}%) / 한도 ${control.daily_loss_limit.toFixed(2)}%`,
         impact: riskBudget.dailyLossReached ? "trading_blocker" : "advisory",
         blocksTrading: riskBudget.dailyLossReached,
+        metadata: {
+          criteria: [
+            { label: "손실 한도", value: `${control.daily_loss_limit.toFixed(2)}%` },
+            { label: "현재 손실", value: `${todayRealizedLossPct.toFixed(2)}%` },
+          ],
+        },
       },
       {
         key: "position_capacity",
@@ -415,6 +426,12 @@ export async function GET() {
           : `보유 ${openPositionCount}/${control.max_positions} · 신규 슬롯 ${riskBudget.positionSlotsRemaining}개`,
         impact: "advisory",
         blocksTrading: false,
+        metadata: {
+          criteria: [
+            { label: "최대 보유", value: `${control.max_positions}종목` },
+            { label: "현재 보유", value: `${openPositionCount}종목` },
+          ],
+        },
       },
       {
         key: "daily_trade_capacity",
@@ -425,6 +442,12 @@ export async function GET() {
           : `당일 체결 ${todayTradeCount}/${control.max_trades_per_day} · 잔여 ${riskBudget.tradeSlotsRemaining}회`,
         impact: "advisory",
         blocksTrading: false,
+        metadata: {
+          criteria: [
+            { label: "당일 한도", value: `${control.max_trades_per_day}회` },
+            { label: "현재 체결", value: `${todayTradeCount}회` },
+          ],
+        },
       },
       {
         key: "cash_capacity",
@@ -437,6 +460,12 @@ export async function GET() {
             : `가용현금 ${availableCash.toLocaleString("ko-KR")}원 · 1회 한도 대비 ${riskBudget.cashShortfallAmount.toLocaleString("ko-KR")}원 부족`,
         impact: "advisory",
         blocksTrading: false,
+        metadata: {
+          criteria: [
+            { label: "1회 한도", value: `${maxPerTradeAmount.toLocaleString("ko-KR")}원` },
+            { label: "가용 현금", value: `${availableCash.toLocaleString("ko-KR")}원` },
+          ],
+        },
       },
       {
         key: "sector_exposure",
@@ -450,6 +479,12 @@ export async function GET() {
           : `섹터당 최대 ${control.max_per_sector}종목 기준 충족`,
         impact: "trading_blocker",
         blocksTrading: sectorExposure.overloadedCount > 0,
+        metadata: {
+          criteria: [
+            { label: "섹터 한도", value: `${control.max_per_sector}종목` },
+            { label: "초과 섹터", value: `${sectorExposure.overloadedCount}개` },
+          ],
+        },
       },
       {
         key: "entry_pressure",
@@ -463,6 +498,12 @@ export async function GET() {
               .join(" · "),
         impact: entryPressure.overflowCount > 0 ? "trading_blocker" : "ops_blocker",
         blocksTrading: entryPressure.overflowCount > 0,
+        metadata: {
+          criteria: [
+            { label: "종목 반복 초과", value: `${entryPressure.overflowCount}건` },
+            { label: "포화 종목", value: `${entryPressure.saturatedCount}건` },
+          ],
+        },
       },
       {
         key: "runtime_mode",
@@ -495,6 +536,12 @@ export async function GET() {
         detail: health.lastRunAt ? `${health.status} · 마지막 실행 ${health.lastRunAt}` : "실행 기록 없음",
         impact: health.status === "stale" ? "ops_blocker" : "trading_blocker",
         blocksTrading: health.status === "error" || health.status === "stale",
+        metadata: {
+          criteria: [
+            { label: "헬스 상태", value: health.status },
+            { label: "마지막 실행", value: health.minutesSinceLastRun === null ? "미확인" : `${health.minutesSinceLastRun}분 전` },
+          ],
+        },
       },
       {
         key: "kis_health",
@@ -523,6 +570,12 @@ export async function GET() {
               : `저장 토큰 ${tokenRemainingMinutes}분 후 만료 · 엔진 실행 시 재발급`,
         impact: "advisory",
         blocksTrading: false,
+        metadata: {
+          criteria: [
+            { label: "저장 토큰", value: hasStoredToken ? "있음" : "없음" },
+            { label: "잔여 시간", value: tokenRemainingMinutes === null ? "미확인" : `${tokenRemainingMinutes}분` },
+          ],
+        },
       },
       {
         key: "kis_order_auth",
@@ -539,6 +592,11 @@ export async function GET() {
         detail: watchlistCount > 0 ? `${watchlistCount}종목 활성` : "활성 종목 없음",
         impact: "ops_blocker",
         blocksTrading: watchlistCount === 0,
+        metadata: {
+          criteria: [
+            { label: "활성 종목", value: `${watchlistCount}개` },
+          ],
+        },
       },
       {
         key: "observer_snapshot",
@@ -563,7 +621,17 @@ export async function GET() {
             : `불일치 ${brokerMismatchCount}건 · DB복구 ${brokerReconcilePlan.missingInDbCount} · 수량보정 ${brokerReconcilePlan.qtyAdjustmentCount} · 고아정리 ${brokerReconcilePlan.orphanedClosureCount}`,
         impact: brokerReconcileInGrace ? "ops_blocker" : "trading_blocker",
         blocksTrading: brokerMismatchCount > 0 && !brokerReconcileInGrace,
-        metadata: brokerMismatchCount > 0 ? brokerReconcilePlan : undefined,
+        metadata: brokerMismatchCount > 0 ? {
+          ...brokerReconcilePlan,
+          criteria: [
+            { label: "총 불일치", value: `${brokerMismatchCount}건` },
+            { label: "재확인 유예", value: brokerReconcileInGrace ? "적용 중" : "없음" },
+          ],
+        } : {
+          criteria: [
+            { label: "총 불일치", value: "0건" },
+          ],
+        },
       },
       {
         key: "pnl_audit",
@@ -580,6 +648,13 @@ export async function GET() {
         detail: staleSignalCount === 0 ? "이상 없음" : `${staleSignalCount}건 정리 필요 · pending_signals 확인 후 만료/거절 정리`,
         impact: "ops_blocker",
         blocksTrading: staleSignalCount > 0,
+        metadata: {
+          criteria: [
+            { label: "정리 대상", value: `${staleSignalCount}건` },
+            { label: "approved 기준", value: "24시간+" },
+            { label: "processing 기준", value: "2시간+" },
+          ],
+        },
       },
       {
         key: "pending_orders",
@@ -592,6 +667,12 @@ export async function GET() {
             : `${pendingOrderCount}건 모니터링 중 · 체결/잔량 취소 여부 확인`,
         impact: stalePendingOrderCount > 0 ? "trading_blocker" : "advisory",
         blocksTrading: stalePendingOrderCount > 0,
+        metadata: {
+          criteria: [
+            { label: "미체결", value: `${pendingOrderCount}건` },
+            { label: "stale", value: `${stalePendingOrderCount}건` },
+          ],
+        },
       },
       {
         key: "recent_order_lifecycle",
@@ -633,6 +714,12 @@ export async function GET() {
             ].filter(Boolean).join(" · "),
         impact: recentOrderFailures.account > 0 ? "trading_blocker" : recentOrderFailures.total > 0 ? "ops_blocker" : "advisory",
         blocksTrading: recentOrderFailures.account > 0,
+        metadata: {
+          criteria: [
+            { label: "최근 1시간", value: `${recentOrderFailures.total}건` },
+            { label: "계좌 오류", value: `${recentOrderFailures.account}건` },
+          ],
+        },
       },
       {
         key: "rehearsal",
@@ -643,6 +730,11 @@ export async function GET() {
           : `${rehearsalSummary.completedCount}/${rehearsalSummary.totalCount} 완료`,
         impact: "ops_blocker",
         blocksTrading: !rehearsalSummary.completed,
+        metadata: {
+          criteria: [
+            { label: "완료", value: `${rehearsalSummary.completedCount}/${rehearsalSummary.totalCount}` },
+          ],
+        },
       },
     ];
     const sortedChecks = sortChecks(checks);
