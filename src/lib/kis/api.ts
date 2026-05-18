@@ -30,8 +30,25 @@ export class KISError extends Error {
   }
 }
 
+const KIS_FETCH_TIMEOUT_MS = 15_000;
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), KIS_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new KISError("KIS request timeout", 504, `KIS 응답 대기 ${Math.floor(KIS_FETCH_TIMEOUT_MS / 1000)}초 초과`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function parseResponseDetail(res: Response): Promise<{ detail: string; kisCode?: string }> {
@@ -66,7 +83,7 @@ function parseKisPayloadError(data: unknown): { detail: string; kisCode?: string
 
 // 토큰 발급
 export async function getTokenDetails(appKey: string, appSecret: string): Promise<KISTokenDetails> {
-  const res = await fetch(`${KIS_API_BASE}/oauth2/tokenP`, {
+  const res = await fetchWithTimeout(`${KIS_API_BASE}/oauth2/tokenP`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -125,7 +142,7 @@ export async function getPrice(config: KISConfig, stockCode: string) {
     fid_input_iscd: stockCode,
   });
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`,
       { headers: headers(config, KIS_TR.PRICE) }
     );
@@ -164,7 +181,7 @@ export async function getBalance(config: KISConfig) {
     CTX_AREA_NK100: "",
   });
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`,
       { headers: headers(config, KIS_TR.BALANCE) }
     );
@@ -206,7 +223,7 @@ export async function placeOrder(
     ORD_UNPR: orderType === "01" ? "0" : String(price),
   };
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`,
       {
         method: "POST",
@@ -257,7 +274,7 @@ export async function getOrderHistory(config: KISConfig) {
     CTX_AREA_NK100: "",
   });
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-daily-ccld?${params}`,
       { headers: headers(config, KIS_TR.ORDER_HISTORY) }
     );
@@ -292,7 +309,7 @@ export async function getOverseasPrice(
   const params = new URLSearchParams({ AUTH: auth, EXCD: exchangeCode, SYMB: symbol });
   const trId = "HHDFS00000300";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(`${KIS_API_BASE}/uapi/overseas-price/v1/quotations/price?${params}`, {
+    const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/overseas-price/v1/quotations/price?${params}`, {
       headers: headers(config, trId),
     });
     if (res.ok) return res.json();
@@ -317,7 +334,7 @@ export async function getOverseasPriceDetail(
   const params = new URLSearchParams({ AUTH: auth, EXCD: exchangeCode, SYMB: symbol });
   const trId = "HHDFS76200200";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(`${KIS_API_BASE}/uapi/overseas-price/v1/quotations/price-detail?${params}`, {
+    const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/overseas-price/v1/quotations/price-detail?${params}`, {
       headers: headers(config, trId),
     });
     if (res.ok) return res.json();
@@ -349,7 +366,7 @@ export async function getOverseasDailyPrices(
   });
   const trId = "HHDFS76240000";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(`${KIS_API_BASE}/uapi/overseas-price/v1/quotations/dailyprice?${query}`, {
+    const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/overseas-price/v1/quotations/dailyprice?${query}`, {
       headers: headers(config, trId),
     });
     if (res.ok) return res.json();
@@ -373,7 +390,7 @@ export async function searchOverseasInfo(
   const query = new URLSearchParams({ PRDT_TYPE_CD: productTypeCode, PDNO: symbol });
   const trId = "CTPF1702R";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(`${KIS_API_BASE}/uapi/overseas-price/v1/quotations/search-info?${query}`, {
+    const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/overseas-price/v1/quotations/search-info?${query}`, {
       headers: headers(config, trId),
     });
     if (res.ok) return res.json();
@@ -405,7 +422,7 @@ export async function getOverseasBalance(
   });
   const trId = isDemoMode() ? "VTTS3012R" : "TTTS3012R";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(`${KIS_API_BASE}/uapi/overseas-stock/v1/trading/inquire-balance?${query}`, {
+    const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/overseas-stock/v1/trading/inquire-balance?${query}`, {
       headers: headers(config, trId),
     });
     if (res.ok) return res.json();
@@ -451,7 +468,7 @@ export async function placeOverseasOrder(
     ORD_DVSN: params.orderDiv,
   };
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(`${KIS_API_BASE}/uapi/overseas-stock/v1/trading/order`, {
+    const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/overseas-stock/v1/trading/order`, {
       method: "POST",
       headers: headers(config, trId),
       body: JSON.stringify(body),
