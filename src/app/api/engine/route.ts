@@ -26,6 +26,21 @@ import { applyEngineAppConfig, DEFAULT_ENGINE_CONFIG, readEngineControlSnapshot 
 import { resolveEngineLockState } from "@/lib/engine/recovery";
 import { resolveRecentFailureHalt } from "@/lib/engine/run-health";
 import { requireCronBearerAuth } from "@/lib/request-guard";
+import { recordEngineEvent } from "@/lib/engine/event-log";
+
+async function markEngineStage(stage: string, payload: Record<string, unknown> = {}) {
+  await recordEngineEvent({
+    eventType: "engine_stage_marker",
+    stockCode: null,
+    entityTable: "operations",
+    entityId: null,
+    payload: {
+      stage,
+      ...payload,
+      marked_at: new Date().toISOString(),
+    },
+  });
+}
 
 async function loadRecentFailureHaltReason(): Promise<string | null> {
   const { data } = await supabase
@@ -324,17 +339,21 @@ async function runEngine(
   let scannedCount = 0;
 
   try {
+    await markEngineStage("run_engine_started");
     const { data: appConfigs } = await supabase.from("app_config").select("key, value");
     const cfgMap = new Map((appConfigs || []).map((r: { key: string; value: unknown }) => [r.key, r.value]));
+    await markEngineStage("app_config_loaded", { config_count: cfgMap.size });
 
     const skipReason = getEngineSkipReason(cfgMap);
     if (skipReason) {
+      await markEngineStage("engine_skipped", { reason: skipReason });
       await logEngineRun(0, [...recoveryActions, { type: "skipped", code: "", detail: skipReason }], 0, 0);
       return NextResponse.json({ skipped: true, reason: skipReason });
     }
 
     const failureHaltReason = await loadRecentFailureHaltReason();
     if (failureHaltReason) {
+      await markEngineStage("failure_halt", { reason: failureHaltReason });
       await logEngineRun(0, [...recoveryActions, { type: "risk_halt", code: "", detail: failureHaltReason }], 0, 0, failureHaltReason);
       await sendEngineErrorAlert(`자동 정지: ${failureHaltReason}`, 0).catch(() => {});
       return NextResponse.json({ halted: true, reason: failureHaltReason }, { status: 503 });
@@ -354,8 +373,13 @@ async function runEngine(
         ? riskAdjustments
         : { surgeEntryTagPenalties: {}, timeBucketPenalties: {}, newsKeywordPenalties: {} },
     );
+    await markEngineStage("learning_applied", { learning_loaded: !!learning, learning_risk_enabled: learningRiskEnabled });
 
     const balanceData = await getBalance(config);
+    await markEngineStage("balance_loaded", {
+      holdings_count: Array.isArray(balanceData?.output1) ? balanceData.output1.length : 0,
+      balance_row_count: Array.isArray(balanceData?.output2) ? balanceData.output2.length : 0,
+    });
     const balanceSummary = (balanceData?.output2 ?? [])[0] ?? {};
     const totalCapital = Number(balanceSummary.tot_evlu_amt) || 0;
     const availableCash = resolveAvailableCash(balanceSummary);
@@ -386,6 +410,12 @@ async function runEngine(
         .gte("created_at", getKstNowParts().date)
         .limit(200),
     ]);
+    await markEngineStage("pretrade_state_loaded", {
+      open_positions_count: openPositionsRes.data?.length ?? 0,
+      stale_signal_count: staleSignalsRes.data?.length ?? 0,
+      pending_order_count: pendingOrdersRes.data?.length ?? 0,
+      today_entry_event_count: todayEntryEventsRes.data?.length ?? 0,
+    });
 
     let openPositionsRows = (openPositionsRes.data ?? []) as Array<Record<string, unknown>>;
     const brokerMismatch = compareBrokerHoldingsWithDb(
@@ -397,6 +427,7 @@ async function runEngine(
     const pretradeReconcileActions: Array<{ type: string; code: string; detail: string }> = [];
 
     if (brokerMismatchCount > 0) {
+      await markEngineStage("pretrade_reconcile_started", { broker_mismatch_count: brokerMismatchCount });
       const brokerHoldings = (balanceData?.output1 ?? []) as Array<Record<string, string>>;
       const restoredPositions = await syncBrokerHoldingsToPositions(brokerHoldings);
       for (const restored of restoredPositions) {
@@ -437,6 +468,7 @@ async function runEngine(
         postRecoveryMismatch.missingInDb.length +
         postRecoveryMismatch.qtyMismatch.length +
         postRecoveryMismatch.orphanedDb.length;
+      await markEngineStage("pretrade_reconcile_completed", { broker_mismatch_count: brokerMismatchCount });
     }
 
     const staleSignalCount = staleSignalsRes.data?.length ?? 0;
@@ -470,8 +502,14 @@ async function runEngine(
       strategyAllocations,
       customWeights: applied.weights,
     };
+    await markEngineStage("step_context_ready", { capital_base: capitalBase, available_cash: availableCash });
 
     const step0 = await runStep0(ctx);
+    await markEngineStage("step0_completed", {
+      halted: step0.halted,
+      action_count: step0.actions.length,
+      market_bonus: step0.marketTrend?.bonus ?? null,
+    });
 
     if (step0.marketTrend) {
       const isTrending = step0.marketTrend.kospiRate > KOSPI_TRENDING_THRESHOLD;
@@ -484,12 +522,18 @@ async function runEngine(
       }
     }
     if (step0.halted) {
+      await markEngineStage("step0_halted", { reason: step0.haltReason ?? null });
       const durationMs = Date.now() - startTime;
       await logEngineRun(0, [...recoveryActions, ...pretradeReconcileActions, ...step0.actions], 0, durationMs);
       return NextResponse.json({ timestamp: new Date().toISOString(), tradeCount: 0, halted: true, reason: step0.haltReason });
     }
 
     const step1 = await runStep1(ctx);
+    await markEngineStage("step1_completed", {
+      trade_count: step1.tradeCount,
+      holding_count: step1.holdings.length,
+      action_count: step1.actions.length,
+    });
     let tradeCount = step1.tradeCount;
     let reconcileRecoveryAction:
       | {
@@ -512,6 +556,7 @@ async function runEngine(
         postStep1Mismatch.missingInDb.length + postStep1Mismatch.qtyMismatch.length + postStep1Mismatch.orphanedDb.length;
 
       if (postStep1MismatchCount > 0) {
+        await markEngineStage("post_step1_reconcile_halt", { broker_mismatch_count: postStep1MismatchCount });
         const reason = `브로커-DB 정합성 불일치 ${postStep1MismatchCount}건`;
         const actions = [
           ...recoveryActions,
@@ -580,6 +625,7 @@ async function runEngine(
     });
 
     if (tradingBlockers.length > 0) {
+      await markEngineStage("runtime_blockers_halt", { blocker_count: tradingBlockers.length });
       const actions = tradingBlockers.map((blocker) => ({
         type: "risk_halt",
         code: "",
@@ -610,6 +656,10 @@ async function runEngine(
 
     const step15 = await runStep15(ctx, step1.holdings, tradeCount);
     tradeCount = step15.tradeCount;
+    await markEngineStage("step15_completed", {
+      trade_count: tradeCount,
+      action_count: step15.actions.length,
+    });
 
     const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
     const { data: snapshots } = await supabase.from("market_snapshots").select("*").eq("date", today);
@@ -617,19 +667,36 @@ async function runEngine(
     for (const s of snapshots || []) {
       snapshotMap.set(s.stock_code, { open_price: Number(s.open_price), snapshot_price: Number(s.snapshot_price), snapshot_volume: Number(s.snapshot_volume) });
     }
+    await markEngineStage("market_snapshots_loaded", { snapshot_count: snapshotMap.size });
 
     const step2 = await runStep2(ctx, step1.holdings, step0.marketTrend, snapshotMap, tradeCount);
     tradeCount = step2.tradeCount;
     scannedCount += step2.scannedCount;
+    await markEngineStage("step2_completed", {
+      trade_count: tradeCount,
+      scanned_count: scannedCount,
+      action_count: step2.actions.length,
+    });
 
     const step3 = await runStep3(ctx, step1.holdings, step0.marketTrend, tradeCount);
     tradeCount = step3.tradeCount;
     scannedCount += step3.scannedCount;
+    await markEngineStage("step3_completed", {
+      trade_count: tradeCount,
+      scanned_count: scannedCount,
+      action_count: step3.actions.length,
+    });
 
     const step4 = await runStep4(ctx, step1.holdings, step0.marketTrend, tradeCount);
     tradeCount = step4.tradeCount;
     scannedCount += step4.scannedCount;
+    await markEngineStage("step4_completed", {
+      trade_count: tradeCount,
+      scanned_count: scannedCount,
+      action_count: step4.actions.length,
+    });
     const postTradeReconcileActions = await reconcilePostTradeBrokerState(config);
+    await markEngineStage("post_trade_reconcile_completed", { action_count: postTradeReconcileActions.length });
 
     const learningRiskAction = {
       type: learningRiskEnabled ? "learning_risk_enabled" : "learning_risk_disabled",
@@ -651,9 +718,15 @@ async function runEngine(
     ];
     const durationMs = Date.now() - startTime;
     await logEngineRun(tradeCount, allActions, scannedCount, durationMs);
+    await markEngineStage("engine_run_logged", {
+      trade_count: tradeCount,
+      scanned_count: scannedCount,
+      duration_ms: durationMs,
+    });
 
     if (getKstNowParts().hhmm >= END_OF_DAY_TIME) {
       await runEndOfDay(config, allActions, cfgMap, today);
+      await markEngineStage("end_of_day_completed");
     }
 
     return NextResponse.json({
@@ -677,6 +750,7 @@ async function runEngine(
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "엔진 실행 실패";
     const durationMs = Date.now() - startTime;
+    await markEngineStage("engine_run_failed", { error: msg.slice(0, 200), duration_ms: durationMs });
     await logEngineRun(0, [], scannedCount, durationMs, msg);
     await sendEngineErrorAlert(msg, durationMs).catch(() => {});
     return NextResponse.json({ error: msg }, { status: 500 });

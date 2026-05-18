@@ -15,6 +15,7 @@ export const ENGINE_EVENT_TYPES = [
   "manual_buy_executed",
   "manual_sell_executed",
   "holding_news_risk_alert_sent",
+  "engine_stage_marker",
   "app_config_updated",
 ] as const;
 
