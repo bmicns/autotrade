@@ -72,6 +72,7 @@ function formatStopLossReentryLabel(stopPrice: number): string {
 const WATCHLIST_STRATEGY = "watchlist_pullback";
 const SURGE_STRATEGY = "surge_momentum";
 const INSTITUTIONAL_STRATEGY = "institutional_follow";
+const SURGE_SCAN_CANDIDATE_LIMIT = 36;
 
 // ═══ STEP 2: 관심종목 신호 분석 (매수) ═══
 export async function runStep2(
@@ -303,7 +304,9 @@ export async function runStep3(
   const holdingCodes = new Set(holdings.map((h) => h.pdno));
   const watchlistSet = new Set(ctx.config.watchlist ?? []);
   watchlistExcludedCount = surgeStocks.filter((candidate) => watchlistSet.has(candidate.code)).length;
-  const candidates = surgeStocks.filter((c) => !watchlistSet.has(c.code));
+  const uncappedCandidates = surgeStocks.filter((c) => !watchlistSet.has(c.code));
+  const candidates = uncappedCandidates.slice(0, SURGE_SCAN_CANDIDATE_LIMIT);
+  const surgeCandidateTrimmedCount = Math.max(0, uncappedCandidates.length - candidates.length);
   const learningNow = new Date();
   const learningTimeBucket = resolveLearningTimeBucket(learningNow);
 
@@ -320,7 +323,7 @@ export async function runStep3(
   actions.push({
     type: "surge_scan_summary",
     code: "",
-    detail: `급등주 후보 ${surgeStocks.length}건 · watchlist 제외 ${watchlistExcludedCount}건 · 실평가 ${candidates.length}건 · ${surgeDiagnostic.marketDiagnostics.map((item) => {
+    detail: `급등주 후보 ${surgeStocks.length}건 · watchlist 제외 ${watchlistExcludedCount}건 · 상한 제외 ${surgeCandidateTrimmedCount}건 · 실평가 ${candidates.length}건 · ${surgeDiagnostic.marketDiagnostics.map((item) => {
       const marketLabel = item.market === "J" ? "KOSPI" : "KOSDAQ";
       const parts = [`${marketLabel} 등락률 ${item.fluctuationCount}건`, `거래량 ${item.volumeCount}건`];
       if (item.fluctuationError) parts.push(`등락률오류 ${item.fluctuationError}`);
