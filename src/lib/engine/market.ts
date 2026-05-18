@@ -5,6 +5,17 @@ import { shouldRetryKisRequest, shouldRetryRateLimit } from "./kis-rate-limit";
 import { type EngineConfig, type MarketTrend, type InvestorTrend, type SurgeScanDiagnostic, type SurgeScanMarketDiagnostic } from "./types";
 import { headers } from "./kis";
 import { MARKET_BONUS_STRONG, MARKET_BONUS_MILD, MARKET_PENALTY_MILD, MARKET_PENALTY_STRONG, INVESTOR_BONUS_BOTH, INVESTOR_BONUS_ORGN, INVESTOR_BONUS_FRGN, INVESTOR_PENALTY_BOTH, INVESTOR_PENALTY_ORGN, INVESTOR_PENALTY_FRGN } from "@/lib/engine/constants";
+const MARKET_FETCH_TIMEOUT_MS = 15_000;
+
+async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MARKET_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 // ─── 시장 전체 지수 모멘텀 (B안: KOSPI + KOSDAQ) ────
 export async function getMarketTrend(config: EngineConfig): Promise<MarketTrend> {
@@ -12,7 +23,7 @@ export async function getMarketTrend(config: EngineConfig): Promise<MarketTrend>
   try {
     const fetchIndex = async (iscd: string) => {
       const params = new URLSearchParams({ fid_cond_mrkt_div_code: "U", fid_input_iscd: iscd });
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-index-price?${params}`,
         { headers: headers(config, "FHPUP02100000") },
       );
@@ -61,7 +72,7 @@ export async function getInvestorTrend(config: EngineConfig, code: string): Prom
       fid_input_date_1: start,
       fid_input_date_2: end,
     });
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-investor?${params}`,
       { headers: headers(config, KIS_TR.INVESTOR_TREND) },
     );
@@ -135,7 +146,7 @@ export async function scanInstitutionalBuys(
         fid_vol_cnt: "",
         fid_input_date_1: "",
       });
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `${KIS_API_BASE}/uapi/domestic-stock/v1/ranking/investor?${params}`,
         { headers: headers(config, KIS_TR.INST_RANKING) },
       );
@@ -197,7 +208,7 @@ async function fetchRankingOutput(
 ): Promise<{ output: Record<string, string>[]; error?: string }> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(`${KIS_API_BASE}${path}?${params}`, {
+      const res = await fetchWithTimeout(`${KIS_API_BASE}${path}?${params}`, {
         headers: headers(config, trId),
       });
       const text = await res.text();

@@ -8,9 +8,20 @@ import { type EngineConfig, type KISPriceOutput, type OpenOrder, type OrderResul
 import { KIS_RATE_LIMIT_DELAY_MS } from "./constants";
 
 type KISCreds = Pick<EngineConfig, "appKey" | "appSecret" | "accountNo" | "accountProductCode" | "token">;
+const KIS_FETCH_TIMEOUT_MS = 15_000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), KIS_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function parseOrderError(res: Response): Promise<string> {
@@ -56,7 +67,7 @@ export async function getPrice(config: EngineConfig, code: string) {
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`, {
+      const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${params}`, {
         headers: headers(config, KIS_TR.PRICE),
       });
 
@@ -115,7 +126,7 @@ export async function getDailyCandles(config: EngineConfig, code: string): Promi
     fid_input_date_1: "", fid_input_date_2: "",
     fid_period_div_code: "D", fid_org_adj_prc: "0",
   });
-  const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?${params}`, {
+  const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?${params}`, {
     headers: headers(config, "FHKST03010100"),
   });
   if (!res.ok) return [];
@@ -137,7 +148,7 @@ export async function getBalance(config: EngineConfig) {
   });
 
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`, {
+    const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${params}`, {
       headers: headers(config, KIS_TR.BALANCE),
     });
     if (res.ok) return res.json();
@@ -157,7 +168,7 @@ export async function executeOrder(config: EngineConfig, trId: string, code: str
   const { cano, productCode: acntPrdtCd } = resolveKisAccountParts(config.accountNo, config.accountProductCode);
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
+      const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
         method: "POST", headers: headers(config, trId),
         body: JSON.stringify({ CANO: cano, ACNT_PRDT_CD: acntPrdtCd, PDNO: code, ORD_DVSN: "01", ORD_QTY: String(qty), ORD_UNPR: "0" }),
       });
@@ -221,7 +232,7 @@ export async function limitBuyOrder(config: EngineConfig, code: string, qty: num
     // Current-price lookup often happens immediately before the order call.
     await sleep(KIS_RATE_LIMIT_DELAY_MS);
     for (let attempt = 0; attempt < 2; attempt++) {
-      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
+      const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-cash`, {
         method: "POST", headers: headers(config, KIS_TR.BUY),
         body: JSON.stringify({
           CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
@@ -277,7 +288,7 @@ export async function checkOrderFill(
       INQR_DVSN_3: "", INQR_DVSN_1: "",
       CTX_AREA_FK100: "", CTX_AREA_NK100: "",
     });
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-ccnl?${params}`,
       { headers: headers(config, "VTTC8001R") },
     );
@@ -340,7 +351,7 @@ export async function getMinuteCandles(config: EngineConfig, code: string): Prom
     fid_etc_cls_code: "",
     fid_pw_data_incu_yn: "Y",
   });
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice?${params}`,
     { headers: headers(config, KIS_TR.MINUTE_CHART) },
   );
@@ -367,7 +378,7 @@ export async function getOpenBuyOrders(config: KISCreds): Promise<OpenOrder[]> {
       INQR_DVSN_1: "", INQR_DVSN_2: "0",
       PRDT_TYPE_CD: "300", SLL_BUY_DVSN_CD: "02",  // 02=매수
     });
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${KIS_API_BASE}/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl?${params}`,
       { headers: headers(config, KIS_TR.OPEN_ORDERS) },
     );
@@ -389,7 +400,7 @@ export async function cancelOpenBuyOrders(config: KISCreds): Promise<{ cancelled
     const rmn = Number(ord.rmn_qty || 0);
     if (rmn <= 0) continue;
     try {
-      const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-rvsecncl`, {
+      const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-rvsecncl`, {
         method: "POST", headers: headers(config, KIS_TR.CANCEL),
         body: JSON.stringify({
           CANO: cano, ACNT_PRDT_CD: acntPrdtCd,
@@ -427,7 +438,7 @@ export async function cancelBuyOrder(
 
   const { cano, productCode: acntPrdtCd } = resolveKisAccountParts(config.accountNo, config.accountProductCode);
   try {
-    const res = await fetch(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-rvsecncl`, {
+    const res = await fetchWithTimeout(`${KIS_API_BASE}/uapi/domestic-stock/v1/trading/order-rvsecncl`, {
       method: "POST",
       headers: headers(config, KIS_TR.CANCEL),
       body: JSON.stringify({

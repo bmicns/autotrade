@@ -4,6 +4,7 @@ import { type EngineConfig, type FilterResult } from "./types";
 import { headers } from "./kis";
 
 const ONE_YEAR_MS = 366 * 86400000; // 366일 — 윤년 포함 1년 이상 보장
+const EXTERNAL_FETCH_TIMEOUT_MS = 10_000;
 
 const DANGER_KEYWORDS = [
   "유상증자", "전환사채", "신주인수권", "감사의견 거절", "감사의견 한정",
@@ -26,9 +27,17 @@ export async function hasDangerousDisclosure(code: string): Promise<{ danger: bo
       end_de: endDate,
       page_count: "20",
     });
-    const res = await fetch(`https://opendart.fss.or.kr/api/list.json?${params2}`, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`https://opendart.fss.or.kr/api/list.json?${params2}`, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!res.ok) return { danger: false, reason: "" };
     const data = await res.json();
     if (data.status !== "000") return { danger: false, reason: "" };
@@ -47,10 +56,17 @@ export async function hasDangerousDisclosure(code: string): Promise<{ danger: bo
 export async function getListingDate(config: EngineConfig, code: string): Promise<string> {
   try {
     const params = new URLSearchParams({ PDNO: code, PRDT_TYPE_CD: "300" });
-    const res = await fetch(
-      `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/search-stock-info?${params}`,
-      { headers: headers(config, "CTPF1002R") },
-    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(
+        `${KIS_API_BASE}/uapi/domestic-stock/v1/quotations/search-stock-info?${params}`,
+        { headers: headers(config, "CTPF1002R"), signal: controller.signal },
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!res.ok) return "";
     const data = await res.json();
     return (data.output?.lstg_dt as string) || "";

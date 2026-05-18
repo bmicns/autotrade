@@ -6,15 +6,23 @@ import { getStrategyLabel } from "@/lib/nexio-display";
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const TG_URL = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage` : "";
+const TELEGRAM_FETCH_TIMEOUT_MS = 8_000;
 
 async function sendMessage(text: string): Promise<void> {
   if (!BOT_TOKEN || !CHAT_ID) return;
   try {
-    await fetch(TG_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: CHAT_ID, text, parse_mode: "HTML" }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TELEGRAM_FETCH_TIMEOUT_MS);
+    try {
+      await fetch(TG_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: CHAT_ID, text, parse_mode: "HTML" }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   } catch { /* 알림 실패가 엔진 실행에 영향 주지 않음 */ }
 }
 
