@@ -22,7 +22,22 @@ import {
   resolveSurgeReentryCooldown,
 } from "@/lib/engine/surge-strategy";
 import { buildOrderFailureAction, recordOrderFailureEvent } from "@/lib/engine/order-failure";
+import { recordEngineEvent } from "@/lib/engine/event-log";
 // intraday 보너스 제거 — VWAP/POC가 analyzeSignal 핵심 지표로 통합됨
+
+async function markStep3Stage(stage: string, payload: Record<string, unknown> = {}) {
+  await recordEngineEvent({
+    eventType: "engine_stage_marker",
+    stockCode: null,
+    entityTable: "operations",
+    entityId: null,
+    payload: {
+      stage: `step3:${stage}`,
+      ...payload,
+      marked_at: new Date().toISOString(),
+    },
+  });
+}
 
 function decideStrength(score: number, strongScore: number, weakScore: number): "strong" | "weak" | "none" {
   return score >= strongScore ? "strong" : score >= weakScore ? "weak" : "none";
@@ -256,9 +271,12 @@ export async function runStep3(
   if (tradeCount >= ctx.maxDailyTrades || openPositionCount >= ctx.maxPositions) return { actions, tradeCount, scannedCount };
 
   const sectorCounts3 = await getSectorCounts();
+  await markStep3Stage("sector_counts_loaded", { sector_count: sectorCounts3.size });
 
   const { candidates: surgeStocks, diagnostic: surgeDiagnostic } = await scanSurgeStocks(ctx.config);
+  await markStep3Stage("surge_candidates_loaded", { surge_stock_count: surgeStocks.length });
   const newsSnapshot = await fetchNewsSnapshot();
+  await markStep3Stage("news_snapshot_loaded", { latest_news_count: newsSnapshot.latestNews.length });
   const holdingCodes = new Set(holdings.map((h) => h.pdno));
   const watchlistSet = new Set(ctx.config.watchlist ?? []);
   watchlistExcludedCount = surgeStocks.filter((candidate) => watchlistSet.has(candidate.code)).length;
@@ -269,8 +287,11 @@ export async function runStep3(
   const candidateCodes = candidates.map((candidate) => candidate.code);
   const candidateNames = new Map(candidates.map((candidate) => [candidate.code, candidate.name]));
   const sCandleMap = await batchFetch(candidateCodes, (code) => getDailyCandles(ctx.config, code));
+  await markStep3Stage("candles_batch_loaded", { candidate_count: candidateCodes.length, candle_count: sCandleMap.size });
   const sInvestorMap = await batchFetch(candidateCodes, (code) => getInvestorTrend(ctx.config, code));
+  await markStep3Stage("investor_batch_loaded", { investor_count: sInvestorMap.size });
   const sMinuteMap = await batchFetch(candidateCodes, (code) => getMinuteCandles(ctx.config, code));
+  await markStep3Stage("minute_batch_loaded", { minute_count: sMinuteMap.size });
   scannedCount += candidates.length;
 
   actions.push({
@@ -286,6 +307,7 @@ export async function runStep3(
   });
 
   for (const code of candidateCodes) {
+    await markStep3Stage("candidate_started", { code, trade_count: tradeCount, open_position_count: openPositionCount });
     if (tradeCount >= ctx.maxDailyTrades) break;
     if (openPositionCount >= ctx.maxPositions) break;
 
@@ -549,6 +571,7 @@ export async function runStep3(
         });
         tradeCount++;
         if (!existingPos) openPositionCount++;
+        await markStep3Stage("candidate_entry_recorded", { code, trade_count: tradeCount, open_position_count: openPositionCount });
       }
       await sleepRateLimit();
 
@@ -574,6 +597,7 @@ export async function runStep3(
         type: "surge_pending", code, name: surgeName,
         detail: `급등주 약한 ${surgeAdjustedScore}점${surgeInvestorTag}${surgeTrigger.reasons.length > 0 ? ` [${surgeTrigger.reasons.join(" · ")}]` : ""} → DB 저장, 승인 대기. ${surgeLearnedSignal.comment}`,
       });
+      await markStep3Stage("candidate_pending_queued", { code });
       await sleepRateLimit();
     } else {
       actions.push({
@@ -583,6 +607,8 @@ export async function runStep3(
       });
     }
   }
+
+  await markStep3Stage("completed", { scanned_count: scannedCount, trade_count: tradeCount });
 
   actions.push({
     type: "surge_scan_funnel",
