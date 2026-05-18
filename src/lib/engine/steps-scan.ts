@@ -39,6 +39,20 @@ async function markStep3Stage(stage: string, payload: Record<string, unknown> = 
   });
 }
 
+async function markStep2Stage(stage: string, payload: Record<string, unknown> = {}) {
+  await recordEngineEvent({
+    eventType: "engine_stage_marker",
+    stockCode: null,
+    entityTable: "operations",
+    entityId: null,
+    payload: {
+      stage: `step2:${stage}`,
+      ...payload,
+      marked_at: new Date().toISOString(),
+    },
+  });
+}
+
 function decideStrength(score: number, strongScore: number, weakScore: number): "strong" | "weak" | "none" {
   return score >= strongScore ? "strong" : score >= weakScore ? "weak" : "none";
 }
@@ -73,13 +87,18 @@ export async function runStep2(
   const strategyBudget = Math.min(getStrategyBudget(ctx.totalCapital, allocationPct), ctx.availableCash || Number.MAX_SAFE_INTEGER);
 
   const sectorCounts = await getSectorCounts();
+  await markStep2Stage("sector_counts_loaded", { sector_count: sectorCounts.size });
 
   const watchlist: string[] = ctx.config.watchlist ?? [];
   const availableWatchlist = watchlist;
+  await markStep2Stage("watchlist_loaded", { watchlist_count: availableWatchlist.length });
 
   const wCandleMap   = await batchFetch(availableWatchlist, (code) => getDailyCandles(ctx.config, code));
+  await markStep2Stage("candles_batch_loaded", { candidate_count: availableWatchlist.length, candle_count: wCandleMap.size });
   const wInvestorMap = await batchFetch(availableWatchlist, (code) => getInvestorTrend(ctx.config, code));
+  await markStep2Stage("investor_batch_loaded", { investor_count: wInvestorMap.size });
   const wMinuteMap   = await batchFetch(availableWatchlist, (code) => getMinuteCandles(ctx.config, code));
+  await markStep2Stage("minute_batch_loaded", { minute_count: wMinuteMap.size });
   scannedCount += availableWatchlist.length;
 
   let openPositionCount = holdings.filter((h) => Number(h.hldg_qty) > 0).length;
@@ -88,6 +107,7 @@ export async function runStep2(
     if (tradeCount >= ctx.maxDailyTrades) break;
     if (openPositionCount >= ctx.maxPositions) break;
     if (!wCandleMap.has(code)) continue;
+    await markStep2Stage("candidate_started", { code, trade_count: tradeCount, open_position_count: openPositionCount });
 
     const candles = wCandleMap.get(code)!;
     if (candles.length < 26) continue;
@@ -211,6 +231,7 @@ export async function runStep2(
           learnedSignal,
           bonuses: { market: marketTrend.bonus, investor: investor.bonus, snapshot: openingBonus },
         });
+        await markStep2Stage("candidate_entry_recorded", { code, trade_count: tradeCount + 1, open_position_count: existingPos ? openPositionCount : openPositionCount + 1 });
         tradeCount++;
         if (!existingPos) openPositionCount++;
       }
@@ -231,6 +252,7 @@ export async function runStep2(
         openingBonus,
         institutionalBonus: investor.bonus,
       });
+      await markStep2Stage("candidate_pending_queued", { code });
 
       actions.push({
         type: "pending_approval", code, name,
@@ -246,6 +268,7 @@ export async function runStep2(
     }
   }
 
+  await markStep2Stage("completed", { scanned_count: scannedCount, trade_count: tradeCount });
   return { actions, tradeCount, scannedCount };
 }
 
