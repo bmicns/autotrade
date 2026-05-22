@@ -11,6 +11,7 @@ import {
 
 const controlInputStyle: React.CSSProperties = {
   flex: 1,
+  minWidth: 0,
   padding: "10px 12px",
   borderRadius: 10,
   border: `1.5px solid ${COLORS.line}`,
@@ -263,11 +264,22 @@ export function EngineControlSection() {
             >
               {restarting ? "재가동 중..." : "엔진 재가동"}
             </button>
-            {restartMessage && (
-              <div style={{ fontSize: 11, color: restartMessage.includes("완료") ? "#15803D" : "#9A3412", marginTop: 8 }}>
-                {restartMessage}
-              </div>
-            )}
+          </div>
+        </div>
+      )}
+
+      {restartMessage && (
+        <div style={{ padding: "0 20px 20px" }}>
+          <div style={{
+            padding: "12px 16px",
+            borderRadius: 14,
+            background: restartMessage.includes("완료") ? "#F0FDF4" : "#FFF7ED",
+            border: `1.5px solid ${restartMessage.includes("완료") ? "#BBF7D0" : "#FED7AA"}`,
+            fontSize: 13,
+            fontWeight: 700,
+            color: restartMessage.includes("완료") ? "#15803D" : "#9A3412",
+          }}>
+            {restartMessage}
           </div>
         </div>
       )}
@@ -321,7 +333,7 @@ export function EngineControlSection() {
         </div>
       </div>
 
-      <div style={{ padding: "0 20px 20px" }}>
+      <div style={{ padding: "0 20px 20px", overflow: "hidden" }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.mid, marginBottom: 8 }}>운영자 이름</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
@@ -329,7 +341,7 @@ export function EngineControlSection() {
             value={operatorDisplayName}
             onChange={(e) => setOperatorDisplayName(e.target.value.slice(0, 24))}
             placeholder="홈 인사말에 표시할 이름"
-            style={{ ...controlInputStyle, textAlign: "left" }}
+            style={{ ...controlInputStyle, textAlign: "left", minWidth: 0 }}
           />
           <button
             disabled={saving || !operatorDisplayName.trim()}
