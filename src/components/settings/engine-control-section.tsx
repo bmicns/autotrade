@@ -118,12 +118,8 @@ export function EngineControlSection() {
         setRestartMessage(data.error ?? "엔진 재가동 실패");
         return;
       }
-      if (data.skipped) {
-        setRestartMessage(data.reason ? `재가동 보류 · ${data.reason}` : "재가동 보류");
-      } else {
-        setRestartMessage("재가동 요청 완료");
-      }
-      await fetchEngineState();
+      setRestartMessage("엔진 재가동 요청 완료 · 백그라운드 실행 중");
+      setTimeout(() => fetchEngineState(), 5000);
     } catch {
       setRestartMessage("엔진 재가동 네트워크 오류");
     } finally {

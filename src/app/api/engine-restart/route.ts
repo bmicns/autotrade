@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { runEngineRequest } from "@/app/api/engine/route";
 import { apiCacheHeaders } from "@/lib/http-cache";
 import { requireSessionWriteRequest } from "@/lib/request-guard";
@@ -7,13 +7,16 @@ export async function POST(req: Request) {
   const guard = requireSessionWriteRequest(req);
   if (guard) return guard;
 
-  try {
-    const response = await runEngineRequest();
-    return response;
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "엔진 재가동 실패" },
-      { status: 500, headers: apiCacheHeaders.realtime },
-    );
-  }
+  after(async () => {
+    try {
+      await runEngineRequest();
+    } catch {
+      // runEngineRequest 내부에서 로깅 처리됨
+    }
+  });
+
+  return NextResponse.json(
+    { triggered: true },
+    { headers: apiCacheHeaders.realtime },
+  );
 }
